@@ -1,0 +1,35 @@
+:root {
+  --eventsphere-blue: #315efb;
+}
+
+body {
+  color: #16213e;
+}
+
+.hero {
+  background: linear-gradient(135deg, #f3f6ff 0%, #ffffff 65%);
+}
+
+.text-primary {
+  color: var(--eventsphere-blue) !important;
+}
+
+.btn-primary {
+  --bs-btn-bg: var(--eventsphere-blue);
+  --bs-btn-border-color: var(--eventsphere-blue);
+  --bs-btn-hover-bg: #2448c7;
+  --bs-btn-hover-border-color: #2448c7;
+}
+
+.feature-card {
+  background: #ffffff;
+  border: 1px solid #e5e9f5;
+  border-radius: 1rem;
+}
+
+.dashboard-shell { min-height: 100vh; }
+.dashboard-sidebar { background: #16213e; min-height: calc(100vh - 56px); }
+.dashboard-sidebar a { color: #dbe4ff; border-radius: .5rem; }
+.dashboard-sidebar a:hover, .dashboard-sidebar a.active { background: rgba(255,255,255,.12); color: #fff; }
+.stat-card { border: 0; border-left: 4px solid var(--eventsphere-blue); }
+@media (max-width: 767.98px) { .dashboard-sidebar { min-height: auto; } }
