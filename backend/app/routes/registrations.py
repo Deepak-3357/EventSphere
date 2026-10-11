@@ -26,13 +26,15 @@ def _registration_error(exc):
 @require_role("student")
 def register(event_id):
     try:
-        registration = registration_service.register_student(event_id, g.current_user["id"])
+        registration = registration_service.register_student(event_id, g.current_user["id"], request.get_json(silent=True) or {})
         return success(
             {
                 "registration_id": registration["id"],
                 "event_id": registration["event_id"],
                 "status": registration["status"],
                 "registered_at": registration["registered_at"],
+                "participation_type": registration["participation_type"],
+                "team_id": registration.get("team_id"),
             },
             201,
         )

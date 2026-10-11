@@ -46,7 +46,10 @@ def download_od_letter(letter_id):
     try:
         letter = od_letter_service.get_for_student(letter_id, g.current_user["id"])
         pdf = od_letter_service.generate_pdf(letter)
-        return send_file(pdf, mimetype="application/pdf", as_attachment=True, download_name=f"{letter['letter_number']}.pdf")
+        response = send_file(pdf, mimetype="application/pdf", as_attachment=True, download_name=f"{letter['letter_number']}.pdf", max_age=0)
+        response.headers["Content-Type"] = "application/pdf"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
     except od_letter_service.ODLetterError as exc:
         return _handle(exc)
     except DatabaseError:

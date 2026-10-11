@@ -13,7 +13,13 @@ function safePdfFilename(letterNumber) { return `${String(letterNumber || "event
       const existingBody = await existing.json();
       setup(existingBody.data, session);
     }
-    document.querySelector("#generateButton").addEventListener("click", async () => { const response = await fetch(`${apiRoot}/registrations/${encodeURIComponent(registrationId)}/od-letter`, { method: "POST", headers }); const body = await response.json(); if (!response.ok) throw new Error(body.error?.message || "OD letter could not be generated."); setup(body.data, session); });
+    const generateButton = document.querySelector("#generateButton");
+    generateButton.addEventListener("click", async () => {
+      if (generateButton.disabled) return;
+      generateButton.disabled = true; generateButton.setAttribute("aria-busy", "true"); generateButton.textContent = "Generating…";
+      try { const response = await fetch(`${apiRoot}/registrations/${encodeURIComponent(registrationId)}/od-letter`, { method: "POST", headers }); const body = await response.json(); if (!response.ok) throw new Error(body.error?.message || "OD letter could not be generated."); setup(body.data, session); }
+      catch (error) { odMessage.className = "alert alert-danger mt-3"; odMessage.textContent = error.message || "OD letter could not be generated."; generateButton.disabled = false; generateButton.removeAttribute("aria-busy"); generateButton.textContent = "Generate OD letter"; }
+    });
   } catch (error) { odMessage.className = "alert alert-danger mt-3"; odMessage.textContent = error.message; }
   function setup(letter, authSession) {
     if (!letter) return;

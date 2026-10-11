@@ -10,11 +10,12 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app import create_app  # noqa: E402
 from app.db import get_connection  # noqa: E402
+from integration_support import require_integration_database, resolve_profile_id  # noqa: E402
 
 
 STUDENT_ONE = {"id": "00000000-0000-0000-0000-000000000001", "email": "student1@example.test"}
 STUDENT_TWO = {"id": "00000000-0000-0000-0000-000000000002", "email": "student2@example.test"}
-ORGANIZER = {"id": "00000000-0000-0000-0000-000000000003", "email": "organizer@example.test"}
+ORGANIZER = {"id": resolve_profile_id("rohan.organizer@example.test", "00000000-0000-0000-0000-000000000003"), "email": "organizer@example.test"}
 
 
 def profile(user, role):
@@ -24,6 +25,7 @@ def profile(user, role):
 class NotificationApiTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        require_integration_database()
         app = create_app()
         app.config.update(TESTING=True)
         cls.client = app.test_client()

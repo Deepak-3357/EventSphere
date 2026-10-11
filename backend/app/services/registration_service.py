@@ -1,6 +1,7 @@
 """Transactional registration operations and participant queries."""
 
 from datetime import datetime, timezone
+import re
 from uuid import UUID
 
 from app.db import get_connection
@@ -39,7 +40,8 @@ def _registration_from_row(row, columns):
 def _event_for_registration(cursor, event_id):
     cursor.execute(
         """select id, title, event_date, start_time, end_time, capacity,
-                  registration_deadline, status
+                  registration_deadline, status, participation_mode,
+                  min_team_size, max_team_size
            from events where id = %s for update""",
         (event_id,),
     )
@@ -49,7 +51,7 @@ def _event_for_registration(cursor, event_id):
 def _check_event_eligibility(event):
     if not event:
         raise RegistrationError("EVENT_NOT_FOUND", "Event not found", 404)
-    event_id, title, event_date, start_time, end_time, capacity, deadline, status = event
+    event_id, title, event_date, start_time, end_time, capacity, deadline, status, mode, min_size, max_size = event
     if status != "published":
         if status in {"cancelled", "completed"}:
             raise RegistrationError("EVENT_UNAVAILABLE", "This event is no longer available for registration")
@@ -65,18 +67,69 @@ def _check_event_eligibility(event):
         "capacity": capacity,
         "registration_deadline": deadline,
         "status": status,
+        "participation_mode": mode,
+        "min_team_size": min_size,
+        "max_team_size": max_size,
     }
 
 
-def register_student(event_id, student_id):
+def _clean_member(member, index):
+    if not isinstance(member, dict):
+        raise RegistrationError("INVALID_TEAM_MEMBER", f"Team member {index + 1} must be an object", 422)
+    name = member.get("full_name")
+    email = member.get("email")
+    department = member.get("department") or None
+    year = member.get("year")
+    if not isinstance(name, str) or not 2 <= len(name.strip()) <= 160:
+        raise RegistrationError("INVALID_TEAM_MEMBER", f"Team member {index + 1} has an invalid name", 422)
+    if not isinstance(email, str) or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email.strip()):
+        raise RegistrationError("INVALID_TEAM_MEMBER", f"Team member {index + 1} has an invalid email", 422)
+    if year is not None and (isinstance(year, bool) or not isinstance(year, int) or not 1 <= year <= 8):
+        raise RegistrationError("INVALID_TEAM_MEMBER", f"Team member {index + 1} has an invalid year", 422)
+    return {"full_name": name.strip(), "email": email.strip().lower(), "department": department, "year": year}
+
+
+def _team_input(cursor, event, student_id, payload):
+    participation_type = payload.get("participation_type", "individual") if isinstance(payload, dict) else "individual"
+    if participation_type not in {"individual", "team"}:
+        raise RegistrationError("INVALID_PARTICIPATION_TYPE", "participation_type must be individual or team", 422)
+    if participation_type == "individual":
+        if event["participation_mode"] not in {"individual", "both"}:
+            raise RegistrationError("PARTICIPATION_NOT_ALLOWED", "This event accepts team registrations only")
+        return participation_type, None, []
+    if event["participation_mode"] not in {"team", "both"}:
+        raise RegistrationError("PARTICIPATION_NOT_ALLOWED", "This event accepts individual registrations only")
+    team = payload.get("team") if isinstance(payload, dict) else None
+    if not isinstance(team, dict) or not isinstance(team.get("name"), str) or not 2 <= len(team.get("name", "").strip()) <= 120:
+        raise RegistrationError("INVALID_TEAM", "Team name and members are required", 422)
+    members = team.get("members")
+    if not isinstance(members, list):
+        raise RegistrationError("INVALID_TEAM", "Team members must be an array", 422)
+    cleaned = [_clean_member(member, index) for index, member in enumerate(members)]
+    cursor.execute("select full_name, email, department, year from profiles where id=%s", (student_id,))
+    leader = cursor.fetchone()
+    if not leader:
+        raise RegistrationError("PROFILE_NOT_FOUND", "Your student profile could not be loaded", 403)
+    all_members = [{"full_name": leader[0], "email": leader[1].lower(), "department": leader[2], "year": leader[3]}] + cleaned
+    emails = [member["email"] for member in all_members]
+    if len(set(emails)) != len(emails):
+        raise RegistrationError("DUPLICATE_TEAM_MEMBER", "Team member emails must be unique", 422)
+    if not event["min_team_size"] <= len(all_members) <= event["max_team_size"]:
+        raise RegistrationError("INVALID_TEAM_SIZE", f"Team size must be between {event['min_team_size']} and {event['max_team_size']} members", 422)
+    return participation_type, team["name"].strip(), all_members
+
+
+def register_student(event_id, student_id, payload=None):
     event_id = parse_uuid(event_id, "event_id")
     student_id = parse_uuid(student_id, "student_id")
+    payload = payload or {}
     with get_connection() as connection:
         with connection.cursor() as cursor:
             event = _check_event_eligibility(_event_for_registration(cursor, event_id))
+            participation_type, team_name, members = _team_input(cursor, event, student_id, payload)
 
             cursor.execute(
-                """select id, status from registrations
+                """select id, status, participation_type, team_id from registrations
                    where event_id = %s and student_id = %s for update""",
                 (event_id, student_id),
             )
@@ -93,20 +146,37 @@ def register_student(event_id, student_id):
                 raise RegistrationError("EVENT_FULL", "This event has no available seats")
 
             if existing and existing[1] == "cancelled":
+                if existing[2] != participation_type:
+                    raise RegistrationError("REGISTRATION_TYPE_CONFLICT", "Cancel the previous registration before changing participation type")
+                team_id = existing[3]
+                if participation_type == "team":
+                    cursor.execute("update teams set name=%s, updated_at=now() where id=%s", (team_name, team_id))
+                    cursor.execute("delete from team_members where team_id=%s", (team_id,))
+                    _insert_team_members(cursor, team_id, members, student_id)
                 cursor.execute(
                     """update registrations set status = 'registered', registered_at = now()
-                       where id = %s returning id, event_id, student_id, registered_at, status""",
+                       where id = %s returning id, event_id, student_id, registered_at, status, participation_type, team_id""",
                     (existing[0],),
                 )
+                row = cursor.fetchone()
+                columns = [description.name for description in cursor.description]
             else:
+                team_id = None
+                if participation_type == "team":
+                    cursor.execute("insert into teams(event_id, name, leader_id) values(%s,%s,%s) returning id", (event_id, team_name, student_id))
+                    team_id = cursor.fetchone()[0]
                 cursor.execute(
-                    """insert into registrations (event_id, student_id, status)
-                       values (%s, %s, 'registered')
-                       returning id, event_id, student_id, registered_at, status""",
-                    (event_id, student_id),
+                    """insert into registrations (event_id, student_id, status, participation_type, team_id)
+                       values (%s, %s, 'registered', %s, %s)
+                       returning id, event_id, student_id, registered_at, status, participation_type, team_id""",
+                    (event_id, student_id, participation_type, team_id),
                 )
-            row = cursor.fetchone()
-            columns = [description.name for description in cursor.description]
+                row = cursor.fetchone()
+                columns = [description.name for description in cursor.description]
+                if team_id:
+                    _insert_team_members(cursor, team_id, members, student_id)
+            from app.services import attendance_service
+            attendance_service.ensure_attendance_code(cursor, row[0], row[1], rotate=bool(existing and existing[1] == "cancelled"))
             notification_service.create_notification(
                 cursor,
                 student_id,
@@ -115,6 +185,21 @@ def register_student(event_id, student_id):
                 "registration",
             )
             return _registration_from_row(row, columns)
+
+
+def _insert_team_members(cursor, team_id, members, leader_id):
+    for position, member in enumerate(members):
+        cursor.execute("select id from profiles where lower(email)=lower(%s)", (member["email"],))
+        profile = cursor.fetchone()
+        member_id = profile[0] if profile else None
+        if member_id and str(member_id) != str(leader_id):
+            cursor.execute("""select 1 from team_members tm join registrations r on r.team_id=tm.team_id
+                              where r.event_id=(select event_id from teams where id=%s)
+                                and r.status='registered' and tm.student_id=%s limit 1""", (team_id, member_id))
+            if cursor.fetchone():
+                raise RegistrationError("DUPLICATE_MEMBER_REGISTRATION", "A team member already has an active registration for this event")
+        cursor.execute("""insert into team_members(team_id, student_id, full_name, email, department, year, position)
+                          values(%s,%s,%s,%s,%s,%s,%s)""", (team_id, member_id, member["full_name"], member["email"], member["department"], member["year"], position))
 
 
 def cancel_student_registration(event_id, student_id):
@@ -138,6 +223,8 @@ def cancel_student_registration(event_id, student_id):
                    where id = %s returning event_id, status""",
                 (registration[0],),
             )
+            from app.services import attendance_service
+            attendance_service.revoke_attendance_code(cursor, registration[0])
             row = cursor.fetchone()
             notification_service.create_notification(
                 cursor,
@@ -152,6 +239,12 @@ def cancel_student_registration(event_id, student_id):
 def _registration_select():
     return """
         r.id as registration_id, r.event_id, r.student_id, r.registered_at, r.status,
+        r.participation_type, r.team_id, t.name as team_name,
+        coalesce((select jsonb_agg(jsonb_build_object(
+            'id', tm.id, 'student_id', tm.student_id, 'full_name', tm.full_name,
+            'email', tm.email, 'department', tm.department, 'year', tm.year,
+            'position', tm.position) order by tm.position)
+            from team_members tm where tm.team_id = r.team_id), '[]'::jsonb) as team_members,
         e.title, e.event_date, e.start_time, e.end_time, e.capacity,
         e.registration_deadline, e.status as event_status,
         v.name as venue_name, v.location as venue_location,
@@ -175,6 +268,13 @@ def _serialize_registration(row, columns):
         "venue": {"name": data.pop("venue_name"), "location": data.pop("venue_location")},
         "category": data.pop("category_name"),
     }
+    data["team"] = None
+    if data.pop("participation_type") == "team":
+        data["team"] = {"id": data.pop("team_id"), "name": data.pop("team_name"), "members": data.pop("team_members") or []}
+    else:
+        data.pop("team_id")
+        data.pop("team_name")
+        data.pop("team_members")
     data["attendance"] = {
         "status": data.pop("attendance_status") or "not_checked_in",
         "checked_in_at": data.pop("checked_in_at"),
@@ -203,6 +303,7 @@ def list_student_registrations(student_id, status=None, upcoming=False):
                     join venues v on v.id = e.venue_id
                     join categories c on c.id = e.category_id
                     join profiles p on p.id = r.student_id
+                    left join teams t on t.id = r.team_id
                     left join attendance a on a.registration_id = r.id
                     where {where}
                     order by e.event_date asc, e.start_time asc, r.registered_at desc""",
@@ -223,6 +324,7 @@ def get_registration(registration_id):
                     join venues v on v.id = e.venue_id
                     join categories c on c.id = e.category_id
                     join profiles p on p.id = r.student_id
+                    left join teams t on t.id = r.team_id
                     left join attendance a on a.registration_id = r.id
                     where r.id = %s""",
                 (registration_id,),
@@ -252,6 +354,7 @@ def list_event_registrations(event_id, status=None):
                     join venues v on v.id = e.venue_id
                     join categories c on c.id = e.category_id
                     join profiles p on p.id = r.student_id
+                    left join teams t on t.id = r.team_id
                     left join attendance a on a.registration_id = r.id
                     where {' and '.join(conditions)}
                     order by r.registered_at asc""",
@@ -285,6 +388,7 @@ def list_all_registrations(event_id=None, status=None, student_id=None):
                     join venues v on v.id = e.venue_id
                     join categories c on c.id = e.category_id
                     join profiles p on p.id = r.student_id
+                    left join teams t on t.id = r.team_id
                     left join attendance a on a.registration_id = r.id{where}
                     order by r.registered_at desc""",
                 params,

@@ -23,6 +23,18 @@ def event_pass(registration_id):
         return error("DATABASE_ERROR", "Event pass could not be loaded", 500)
 
 
+@attendance_bp.get("/registrations/<registration_id>/attendance-code")
+@require_auth
+@require_role("student")
+def attendance_code(registration_id):
+    try:
+        return success(attendance_service.get_attendance_code(registration_id, g.current_user["id"]))
+    except attendance_service.AttendanceError as exc:
+        return error(exc.code, exc.message, exc.status)
+    except DatabaseError:
+        return error("DATABASE_ERROR", "Attendance code could not be loaded", 500)
+
+
 @attendance_bp.post("/attendance/check-in")
 @require_auth
 @require_role("organizer", "admin")
@@ -32,6 +44,24 @@ def check_in():
         return error("MALFORMED_QR", "qr_payload is required", 400)
     try:
         result = attendance_service.check_in(body["qr_payload"], g.current_user["id"], g.current_profile["role"])
+        return success(result, status=201)
+    except attendance_service.AttendanceError as exc:
+        return error(exc.code, exc.message, exc.status)
+    except DatabaseError:
+        return error("DATABASE_ERROR", "Attendance could not be recorded", 500)
+
+
+@attendance_bp.post("/attendance/manual-check-in")
+@require_auth
+@require_role("organizer", "admin")
+def manual_check_in():
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body.get("event_id"), str) or not isinstance(body.get("code"), str):
+        return error("INVALID_ATTENDANCE_CODE", "event_id and a six-digit code are required", 400)
+    try:
+        result = attendance_service.manual_check_in(
+            body["event_id"], body["code"], g.current_user["id"], g.current_profile["role"]
+        )
         return success(result, status=201)
     except attendance_service.AttendanceError as exc:
         return error(exc.code, exc.message, exc.status)

@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
+from integration_support import require_integration_database
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,8 +16,7 @@ load_dotenv(ROOT / ".env")
 class DatabaseIntegrationTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not os.getenv("SUPABASE_DB_HOST") or not os.getenv("SUPABASE_DB_PASSWORD"):
-            raise unittest.SkipTest("Database credentials are not configured in local .env")
+        require_integration_database()
 
         from app.db import get_connection
 

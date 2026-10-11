@@ -57,7 +57,7 @@ def _load_profile(user_id):
             cursor.execute(
                 """
                 select id, full_name, email, phone, role, department, year,
-                       created_at, updated_at
+                       created_at, updated_at, is_master_admin
                 from profiles
                 where id = %s
                 """,
@@ -108,6 +108,19 @@ def require_role(*allowed_roles):
         return wrapped
 
     return decorator
+
+
+def require_master_admin(view):
+    """Require the database-backed single Master Admin designation."""
+
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        profile = getattr(g, "current_profile", None)
+        if not profile or profile.get("role") != "admin" or profile.get("is_master_admin") is not True:
+            return error("FORBIDDEN", "Master Admin permissions required", 403)
+        return view(*args, **kwargs)
+
+    return wrapped
 
 
 @auth_bp.get("/me")

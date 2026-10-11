@@ -12,12 +12,13 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app import create_app  # noqa: E402
 from app.db import get_connection  # noqa: E402
+from integration_support import require_integration_database, resolve_profile_id  # noqa: E402
 
 STUDENT_ONE = {"id": "00000000-0000-0000-0000-000000000001", "email": "student1@example.test"}
 STUDENT_TWO = {"id": "00000000-0000-0000-0000-000000000002", "email": "student2@example.test"}
-ORGANIZER = {"id": "00000000-0000-0000-0000-000000000003", "email": "organizer@example.test"}
+ORGANIZER = {"id": resolve_profile_id("rohan.organizer@example.test", "00000000-0000-0000-0000-000000000003"), "email": "organizer@example.test"}
 OTHER = {"id": "00000000-0000-0000-0000-000000000004", "email": "other@example.test"}
-ADMIN = {"id": "00000000-0000-0000-0000-000000000005", "email": "admin@example.test"}
+ADMIN = {"id": resolve_profile_id("admin@example.test", "00000000-0000-0000-0000-000000000005"), "email": "admin@example.test"}
 
 
 def profile(user, role):
@@ -27,6 +28,7 @@ def profile(user, role):
 class Phase8ApiTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        require_integration_database()
         app = create_app(); app.config.update(TESTING=True); cls.client = app.test_client()
 
     def setUp(self):
@@ -101,8 +103,18 @@ class Phase8ApiTestCase(unittest.TestCase):
         self.assertEqual(first_data["id"], second_data["id"]); self.assertTrue(first_data["letter_number"].startswith("OD-"))
         with self.auth(STUDENT_ONE, "student"):
             download = self.client.get(f"/api/od-letters/{first_data['id']}/download", headers=self.headers())
-        self.assertEqual(download.status_code, 200); self.assertEqual(download.mimetype, "application/pdf")
+        self.assertEqual(download.status_code, 200); self.assertEqual(download.mimetype, "application/pdf"); self.assertTrue(download.data.startswith(b"%PDF")); self.assertIn("attachment", download.headers.get("Content-Disposition", "")); self.assertIn(first_data["letter_number"], download.headers.get("Content-Disposition", ""))
         reader = PdfReader(io.BytesIO(download.data)); self.assertEqual(len(reader.pages), 1); self.assertIn("ON-DUTY LETTER", reader.pages[0].extract_text())
+
+    def test_od_download_rejects_missing_and_non_owner_requests(self):
+        with self.auth(STUDENT_ONE, "student"):
+            generated = self.client.post(f"/api/registrations/{self.registration_id}/od-letter", headers=self.headers()).get_json()["data"]
+        with self.auth(STUDENT_TWO, "student"):
+            unauthorized = self.client.get(f"/api/od-letters/{generated['id']}/download", headers=self.headers())
+        with self.auth(STUDENT_ONE, "student"):
+            missing = self.client.get(f"/api/od-letters/{uuid.uuid4()}/download", headers=self.headers())
+        self.assertEqual(unauthorized.status_code, 404)
+        self.assertEqual(missing.status_code, 404)
 
     def test_od_verification_accepts_signed_token_and_rejects_invalid(self):
         with self.auth(STUDENT_ONE, "student"):

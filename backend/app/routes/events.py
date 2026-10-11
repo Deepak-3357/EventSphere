@@ -127,6 +127,77 @@ def get_event(event_id):
         return _handle_database_error()
 
 
+@events_bp.get("/<event_id>/faqs")
+def get_event_faqs(event_id):
+    try:
+        event_id = event_service.parse_uuid(event_id, "event_id")
+        event = event_service.get_event(event_id)
+        if not event or event["status"] != "published":
+            return error("NOT_FOUND", "Event not found", 404)
+        return success(list(event_service.list_faqs(event_id)))
+    except ValueError as exc:
+        return error("VALIDATION_ERROR", str(exc), 422)
+    except DatabaseError:
+        return _handle_database_error()
+
+
+@events_bp.post("/<event_id>/faqs")
+@require_auth
+@require_role("organizer", "admin")
+def create_event_faq(event_id):
+    try:
+        event_id = event_service.parse_uuid(event_id, "event_id")
+        event = event_service.get_event(event_id)
+        if not event:
+            return error("NOT_FOUND", "Event not found", 404)
+        if not _owned_or_admin(event):
+            return error("FORBIDDEN", "You may only manage FAQs for your own events", 403)
+        return success(event_service.create_faq(event_id, request.get_json(silent=True)), 201)
+    except ValueError as exc:
+        return error("VALIDATION_ERROR", str(exc), 422)
+    except DatabaseError:
+        return _handle_database_error()
+
+
+@events_bp.patch("/<event_id>/faqs/<faq_id>")
+@require_auth
+@require_role("organizer", "admin")
+def update_event_faq(event_id, faq_id):
+    try:
+        event_id, faq_id = event_service.parse_uuid(event_id, "event_id"), event_service.parse_uuid(faq_id, "faq_id")
+        actual_event_id = event_service.faq_event_id(faq_id)
+        if actual_event_id != event_id:
+            return error("NOT_FOUND", "FAQ not found", 404)
+        event = event_service.get_event(event_id)
+        if not event or not _owned_or_admin(event):
+            return error("FORBIDDEN", "You may only manage FAQs for your own events", 403)
+        faq = event_service.update_faq(faq_id, request.get_json(silent=True))
+        return success(faq) if faq else error("NOT_FOUND", "FAQ not found", 404)
+    except ValueError as exc:
+        return error("VALIDATION_ERROR", str(exc), 422)
+    except DatabaseError:
+        return _handle_database_error()
+
+
+@events_bp.delete("/<event_id>/faqs/<faq_id>")
+@require_auth
+@require_role("organizer", "admin")
+def delete_event_faq(event_id, faq_id):
+    try:
+        event_id, faq_id = event_service.parse_uuid(event_id, "event_id"), event_service.parse_uuid(faq_id, "faq_id")
+        if event_service.faq_event_id(faq_id) != event_id:
+            return error("NOT_FOUND", "FAQ not found", 404)
+        event = event_service.get_event(event_id)
+        if not event or not _owned_or_admin(event):
+            return error("FORBIDDEN", "You may only manage FAQs for your own events", 403)
+        event_service.delete_faq(faq_id)
+        return success({"deleted": True})
+    except ValueError as exc:
+        return error("VALIDATION_ERROR", str(exc), 422)
+    except DatabaseError:
+        return _handle_database_error()
+
+
 @events_bp.post("")
 @require_auth
 @require_role("organizer", "admin")
@@ -226,6 +297,12 @@ def _change_event_status(event_id, new_status):
                     "capacity": existing["capacity"],
                     "registration_deadline": existing["registration_deadline"],
                     "image_url": existing["image_url"],
+                    "participation_mode": existing["participation_mode"],
+                    "min_team_size": existing["min_team_size"],
+                    "max_team_size": existing["max_team_size"],
+                    "eligibility": existing["eligibility"],
+                    "registration_instructions": existing["registration_instructions"],
+                    "facilities": existing["facilities"],
                 },
                 requested_status=new_status,
             )

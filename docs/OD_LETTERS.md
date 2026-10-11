@@ -2,6 +2,8 @@
 
 Students can generate one EventSphere OD letter for each active registration in a published event. The student registration page links to the OD workflow, which creates/reuses metadata and offers a PDF download.
 
+The download endpoint returns `application/pdf` with an attachment filename. The browser fetches the authenticated response as a Blob, rejects JSON/error responses instead of saving them as `.pdf`, and revokes the temporary object URL after the download starts.
+
 ## APIs
 
 - `POST /api/registrations/<registration_id>/od-letter` creates or reuses an OD record for the authenticated owner.

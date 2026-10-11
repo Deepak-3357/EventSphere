@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">EventSphere event cover</title><desc id="desc">Abstract blue and purple event cover</desc>
+  <defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#315efb"/><stop offset="1" stop-color="#722cf5"/></linearGradient></defs>
+  <rect width="1200" height="630" fill="url(#g)"/><circle cx="1000" cy="90" r="210" fill="#fff" opacity=".12"/><circle cx="150" cy="580" r="260" fill="#fff" opacity=".1"/><text x="80" y="330" fill="#fff" font-family="Arial,sans-serif" font-size="64" font-weight="700">EventSphere</text>
+</svg>

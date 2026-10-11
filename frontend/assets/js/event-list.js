@@ -12,7 +12,7 @@ fetch(apiUrl("/api/events?limit=100"))
     listMessage.textContent = `${body.pagination.total} published event${body.pagination.total === 1 ? "" : "s"}`;
     listElement.innerHTML = body.data.map((event) => `
       <div class="col-md-6 col-lg-4">
-        <article class="card h-100 border-0 shadow-sm"><div class="card-body">
+        <article class="card h-100 border-0 shadow-sm event-card"><img class="event-cover" src="${escapeHtml(event.image_url || "../assets/img/event-fallback.svg")}" alt="Cover image for ${escapeHtml(event.title)}" onerror="this.onerror=null;this.src='../assets/img/event-fallback.svg';"><div class="card-body">
           <span class="badge text-bg-primary mb-3">${escapeHtml(event.category.name)}</span>
           <h2 class="h5">${escapeHtml(event.title)}</h2>
           <p class="small text-secondary">${escapeHtml(event.event_date)} · ${escapeHtml(event.venue.name)}</p>

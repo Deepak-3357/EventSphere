@@ -72,3 +72,20 @@ RLS remains enabled. Registration reads are allowed for the student owner, the o
 - My registrations: `http://127.0.0.1:5500/student/registrations/`
 
 These are minimal workflow pages, not the final dashboard design.
+## Individual and team registration
+
+`POST /api/events/<event_id>/register` accepts an optional JSON body. Omit it, or send `{"participation_type":"individual"}`, for the existing individual flow. For a team event send:
+
+```json
+{
+  "participation_type": "team",
+  "team": {
+    "name": "Blue Orbit",
+    "members": [
+      {"full_name": "Member Two", "email": "member.two@example.test", "department": "Computer Science", "year": 2}
+    ]
+  }
+}
+```
+
+The authenticated student is always the team leader and is added from the verified profile; client-supplied user IDs are ignored. The backend enforces the event mode, configured team-size bounds, unique member emails, active duplicate registrations, deadline, and capacity while holding the event row lock. Registration responses and registration-list records include `participation_type` and a team member list. Cancellation preserves the team/member history and marks the registration cancelled; re-registration reactivates the same registration after validating the submitted team again.

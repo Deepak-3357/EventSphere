@@ -32,4 +32,11 @@ body {
 .dashboard-sidebar a { color: #dbe4ff; border-radius: .5rem; }
 .dashboard-sidebar a:hover, .dashboard-sidebar a.active { background: rgba(255,255,255,.12); color: #fff; }
 .stat-card { border: 0; border-left: 4px solid var(--eventsphere-blue); }
+.event-cover, .event-hero { width: 100%; object-fit: cover; background: #e9edff; }
+.event-cover { height: 180px; }
+.event-hero { max-height: 360px; }
+.event-card { overflow: hidden; transition: transform .15s ease, box-shadow .15s ease; }
+.event-card:hover { transform: translateY(-2px); box-shadow: 0 .75rem 1.5rem rgba(27, 39, 94, .12) !important; }
+.detail-section { border-top: 1px solid #e9edf7; padding-top: 1.25rem; margin-top: 1.5rem; }
+.facility-card { height: 100%; padding: .8rem 1rem; border-radius: .75rem; background: #f5f7ff; }
 @media (max-width: 767.98px) { .dashboard-sidebar { min-height: auto; } }

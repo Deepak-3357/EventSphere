@@ -12,7 +12,18 @@ py -m unittest discover -s tests -v
 py -m compileall -q backend tests
 ```
 
-The final audit suite passed 42 tests with pytest. The tests also parse a generated one-page PDF with pypdf and verify signed/tampered OD and attendance tokens.
+Database-writing integration tests require an explicit process-only opt-in; they never modify `.env` or `.env.local`:
+
+```powershell
+$env:EVENTSPHERE_TEST_DATABASE='local'
+$env:EVENTSPHERE_TEST_DB_WRITES='ALLOW_EVENTSPHERE_LOCAL_DB'
+$env:EVENTSPHERE_TEST_PROJECT_REF='<approved local Supabase project ref>'
+py -m pytest -q
+```
+
+Without those variables, isolated tests run and database-writing tests are skipped. The fixture guard refuses `FLASK_ENV=production`, checks the approved project reference, and resolves provisioned organizer/admin profile IDs by email instead of using obsolete seeded UUIDs.
+
+The current suite contains 51 tests. With the explicit local integration opt-in, all 51 pass. The tests also parse a generated one-page PDF with pypdf and verify signed/tampered OD and attendance tokens. The team-registration tests cover valid team persistence, cancellation, invalid sizes, duplicate members, individual/team mode enforcement, and capacity.
 
 ## Security matrix
 

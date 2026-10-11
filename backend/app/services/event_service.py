@@ -6,6 +6,7 @@ from uuid import UUID
 
 from app.db import get_connection
 from app.services import notification_service
+from psycopg.types.json import Jsonb
 
 
 EVENT_STATUSES = {"draft", "pending", "published", "cancelled", "completed"}
@@ -66,6 +67,23 @@ def validate_image_url(value):
     return value
 
 
+def validate_participation(payload):
+    mode = payload.get("participation_mode", "individual")
+    if mode not in {"individual", "team", "both"}:
+        raise ValueError("participation_mode must be individual, team, or both")
+    minimum = payload.get("min_team_size")
+    maximum = payload.get("max_team_size")
+    if mode == "individual":
+        if minimum is not None or maximum is not None:
+            raise ValueError("team size limits are only valid for team participation")
+        return mode, None, None
+    if any(isinstance(value, bool) or not isinstance(value, int) for value in (minimum, maximum)):
+        raise ValueError("min_team_size and max_team_size are required integers for team participation")
+    if minimum < 2 or maximum < minimum or maximum > 100:
+        raise ValueError("team size must be between 2 and 100, with max_team_size >= min_team_size")
+    return mode, minimum, maximum
+
+
 def validate_event_payload(payload, current=None, requested_status=None):
     if not isinstance(payload, dict):
         raise ValueError("Request body must be a JSON object")
@@ -110,6 +128,18 @@ def validate_event_payload(payload, current=None, requested_status=None):
     if status not in EVENT_STATUSES:
         raise ValueError("status must be one of draft, pending, published, cancelled, completed")
 
+    participation_mode, min_team_size, max_team_size = validate_participation(merged)
+    eligibility = merged.get("eligibility") or ""
+    instructions = merged.get("registration_instructions") or ""
+    if not isinstance(eligibility, str) or len(eligibility) > 2000:
+        raise ValueError("eligibility must be at most 2000 characters")
+    if not isinstance(instructions, str) or len(instructions) > 3000:
+        raise ValueError("registration_instructions must be at most 3000 characters")
+    facilities = merged.get("facilities") or {}
+    if not isinstance(facilities, dict):
+        raise ValueError("facilities must be a JSON object")
+    if len(str(facilities)) > 5000:
+        raise ValueError("facilities are too large")
     return {
         "title": title.strip(),
         "description": description.strip(),
@@ -122,13 +152,21 @@ def validate_event_payload(payload, current=None, requested_status=None):
         "registration_deadline": deadline,
         "status": status,
         "image_url": validate_image_url(merged.get("image_url")),
+        "participation_mode": participation_mode,
+        "min_team_size": min_team_size,
+        "max_team_size": max_team_size,
+        "eligibility": eligibility.strip(),
+        "registration_instructions": instructions.strip(),
+        "facilities": facilities,
     }
 
 
 EVENT_SELECT = """
     e.id, e.title, e.description, e.category_id, e.organizer_id, e.venue_id,
     e.event_date, e.start_time, e.end_time, e.capacity,
-    e.registration_deadline, e.status, e.image_url, e.created_at, e.updated_at,
+    e.registration_deadline, e.status, e.image_url, e.participation_mode,
+    e.min_team_size, e.max_team_size, e.eligibility, e.registration_instructions,
+    e.facilities, e.created_at, e.updated_at,
     (select count(*) from registrations r where r.event_id = e.id and r.status = 'registered')::int as registered_count,
     (e.capacity - (select count(*) from registrations r where r.event_id = e.id and r.status = 'registered'))::int as available_seats,
     c.name as category_name,
@@ -242,8 +280,10 @@ def is_student_registered(event_id, student_id):
         with connection.cursor() as cursor:
             cursor.execute(
                 """select exists(select 1 from registrations
-                   where event_id = %s and student_id = %s and status = 'registered')""",
-                (event_id, student_id),
+                   where event_id = %s and student_id = %s and status = 'registered')
+                   or exists(select 1 from team_members tm join registrations r on r.team_id = tm.team_id
+                   where r.event_id = %s and r.status = 'registered' and tm.student_id = %s)""",
+                (event_id, student_id, event_id, student_id),
             )
             return cursor.fetchone()[0]
 
@@ -262,11 +302,13 @@ def create_event(payload, organizer_id):
                 raise LookupError("Venue does not exist")
             cursor.execute(
                 """insert into events (title, description, category_id, organizer_id, venue_id,
-                   event_date, start_time, end_time, capacity, registration_deadline, status, image_url)
+                   event_date, start_time, end_time, capacity, registration_deadline, status, image_url,
+                   participation_mode, min_team_size, max_team_size, eligibility, registration_instructions, facilities)
                    values (%(title)s, %(description)s, %(category_id)s, %(organizer_id)s, %(venue_id)s,
                    %(event_date)s, %(start_time)s, %(end_time)s, %(capacity)s, %(registration_deadline)s,
-                   %(status)s, %(image_url)s) returning id""",
-                {**values, "organizer_id": organizer_id},
+                   %(status)s, %(image_url)s, %(participation_mode)s, %(min_team_size)s, %(max_team_size)s,
+                   %(eligibility)s, %(registration_instructions)s, %(facilities)s) returning id""",
+                {**values, "organizer_id": organizer_id, "facilities": Jsonb(values["facilities"])},
             )
             event_id = cursor.fetchone()[0]
             return _fetch_event(cursor, event_id)
@@ -282,6 +324,12 @@ def update_event(event_id, payload):
             source["category_id"] = current["category"]["id"]
             source["venue_id"] = current["venue"]["id"]
             source["image_url"] = current["image_url"]
+            source["participation_mode"] = current["participation_mode"]
+            source["min_team_size"] = current["min_team_size"]
+            source["max_team_size"] = current["max_team_size"]
+            source["eligibility"] = current["eligibility"]
+            source["registration_instructions"] = current["registration_instructions"]
+            source["facilities"] = current["facilities"]
             source["status"] = current["status"]
             source["event_date"] = date.fromisoformat(current["event_date"])
             source["start_time"] = time.fromisoformat(current["start_time"])
@@ -292,16 +340,20 @@ def update_event(event_id, payload):
                 raise ValueError(f"Cannot transition event from {current['status']} to {values['status']}")
             changed_fields = {
                 field
-                for field in ("title", "description", "category_id", "venue_id", "event_date", "start_time", "end_time", "capacity", "registration_deadline", "image_url")
+                for field in ("title", "description", "category_id", "venue_id", "event_date", "start_time", "end_time", "capacity", "registration_deadline", "image_url", "participation_mode", "min_team_size", "max_team_size", "eligibility", "registration_instructions", "facilities")
                 if values[field] != source.get(field)
             }
             active_ids = notification_service.active_registrant_ids(cursor, event_id) if current["status"] == "published" else []
             values["event_id"] = event_id
+            values["facilities"] = Jsonb(values["facilities"])
             cursor.execute(
                 """update events set title=%(title)s, description=%(description)s, category_id=%(category_id)s,
                    venue_id=%(venue_id)s, event_date=%(event_date)s, start_time=%(start_time)s,
                    end_time=%(end_time)s, capacity=%(capacity)s, registration_deadline=%(registration_deadline)s,
-                   status=%(status)s, image_url=%(image_url)s, updated_at=now()
+                   status=%(status)s, image_url=%(image_url)s, participation_mode=%(participation_mode)s,
+                   min_team_size=%(min_team_size)s, max_team_size=%(max_team_size)s,
+                   eligibility=%(eligibility)s, registration_instructions=%(registration_instructions)s,
+                   facilities=%(facilities)s, updated_at=now()
                    where id=%(event_id)s""",
                 values,
             )
@@ -381,3 +433,72 @@ def list_venues():
         with connection.cursor() as cursor:
             cursor.execute("select id, name, location, capacity from venues order by name")
             return [{"id": str(row[0]), "name": row[1], "location": row[2], "capacity": row[3]} for row in cursor.fetchall()]
+
+
+def list_faqs(event_id):
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("select id, event_id, question, answer, position from event_faqs where event_id=%s order by position, created_at", (event_id,))
+            return [{"id": str(row[0]), "event_id": str(row[1]), "question": row[2], "answer": row[3], "position": row[4]} for row in cursor.fetchall()]
+
+
+def create_faq(event_id, payload):
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object")
+    question, answer = payload.get("question"), payload.get("answer")
+    if not isinstance(question, str) or not 3 <= len(question.strip()) <= 300:
+        raise ValueError("question must be between 3 and 300 characters")
+    if not isinstance(answer, str) or not 1 <= len(answer.strip()) <= 3000:
+        raise ValueError("answer must be between 1 and 3000 characters")
+    position = payload.get("position", 0)
+    if isinstance(position, bool) or not isinstance(position, int) or position < 0:
+        raise ValueError("position must be a non-negative integer")
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("insert into event_faqs(event_id, question, answer, position) values(%s,%s,%s,%s) returning id", (event_id, question.strip(), answer.strip(), position))
+            faq_id = cursor.fetchone()[0]
+            cursor.execute("select id, event_id, question, answer, position from event_faqs where id=%s", (faq_id,))
+            row = cursor.fetchone()
+            return {"id": str(row[0]), "event_id": str(row[1]), "question": row[2], "answer": row[3], "position": row[4]}
+
+
+def update_faq(faq_id, payload):
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object")
+    fields, params = [], []
+    for name, limit in (("question", 300), ("answer", 3000)):
+        if name in payload:
+            value = payload[name]
+            if not isinstance(value, str) or not value.strip() or len(value.strip()) > limit:
+                raise ValueError(f"{name} is invalid")
+            fields.append(f"{name}=%s"); params.append(value.strip())
+    if "position" in payload:
+        if isinstance(payload["position"], bool) or not isinstance(payload["position"], int) or payload["position"] < 0:
+            raise ValueError("position must be a non-negative integer")
+        fields.append("position=%s"); params.append(payload["position"])
+    if not fields:
+        raise ValueError("At least one FAQ field is required")
+    params.append(faq_id)
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(f"update event_faqs set {', '.join(fields)}, updated_at=now() where id=%s returning id, event_id, question, answer, position", params)
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return {"id": str(row[0]), "event_id": str(row[1]), "question": row[2], "answer": row[3], "position": row[4]}
+
+
+def delete_faq(faq_id):
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("delete from event_faqs where id=%s returning event_id", (faq_id,))
+            row = cursor.fetchone()
+            return str(row[0]) if row else None
+
+
+def faq_event_id(faq_id):
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("select event_id from event_faqs where id=%s", (faq_id,))
+            row = cursor.fetchone()
+            return str(row[0]) if row else None

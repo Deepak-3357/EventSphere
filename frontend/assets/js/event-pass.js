@@ -25,6 +25,8 @@ const passCard = document.querySelector("#passCard");
     document.querySelector("#eventDetails").textContent = `${pass.event.event_date} · ${pass.event.start_time}–${pass.event.end_time} · ${pass.event.venue.name}, ${pass.event.venue.location}`;
     document.querySelector("#studentDetails").textContent = `${pass.student.name} · ${pass.student.department || ""} · Year ${pass.student.year || ""}`;
     document.querySelector("#attendanceStatus").textContent = pass.attendance.status;
+    if (!/^\d{6}$/.test(pass.attendance_code || "")) throw new Error("This event pass does not contain a valid attendance code.");
+    document.querySelector("#attendanceCode").textContent = pass.attendance_code;
     const qrCode = document.querySelector("#qrCode");
     const qrReady = new Promise((resolve, reject) => {
       qrCode.onload = resolve;
