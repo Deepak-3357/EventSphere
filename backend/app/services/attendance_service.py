@@ -253,11 +253,17 @@ def get_event_pass(registration_id, student_id):
                 raise AttendanceError("PASS_UNAVAILABLE", "Event pass is unavailable for this registration", 409)
             try:
                 qr_payload = _signed_payload(registration_id)
+            except AttendanceError as exc:
+                logger.error("event_pass_failed stage=qr_generation code=%s exception=%s", exc.code, type(exc).__name__)
+                raise
             except Exception as exc:
                 logger.error("event_pass_failed stage=qr_generation exception=%s", type(exc).__name__)
                 raise
             try:
                 attendance_code = ensure_attendance_code(cursor, row[0], row[3])
+            except AttendanceError as exc:
+                logger.error("event_pass_failed stage=attendance_code code=%s exception=%s", exc.code, type(exc).__name__)
+                raise
             except Exception as exc:
                 logger.error("event_pass_failed stage=attendance_code exception=%s", type(exc).__name__)
                 raise

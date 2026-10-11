@@ -7,8 +7,10 @@ import sys
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
+from psycopg.errors import UndefinedTable
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
@@ -82,6 +84,22 @@ class ProductionQrPdfRegressionTestCase(unittest.TestCase):
             cipher = _code_fernet()
             encrypted = cipher.encrypt(b"123456")
             self.assertEqual(cipher.decrypt(encrypted), b"123456")
+
+    def test_missing_attendance_codes_table_produces_sanitized_500(self):
+        registration_id = str(uuid.uuid4())
+        with patch("app.routes.auth.verify_access_token", return_value={"id": "00000000-0000-0000-0000-000000000001"}), \
+             patch("app.routes.auth._load_profile", return_value={"id": "00000000-0000-0000-0000-000000000001", "role": "student"}), \
+             patch("app.routes.attendance.attendance_service.get_event_pass", side_effect=UndefinedTable("attendance_codes")):
+            response = self.app.test_client().get(
+                f"/api/registrations/{registration_id}/pass",
+                headers={"Authorization": "Bearer test-session"},
+            )
+        self.assertEqual(response.status_code, 500)
+        body = response.get_json()
+        self.assertEqual(body["success"], False)
+        self.assertEqual(body["error"]["code"], "DATABASE_ERROR")
+        self.assertEqual(body["error"]["message"], "Event pass could not be loaded")
+        self.assertNotIn("attendance_codes", body["error"]["message"])
 
     def test_event_pass_uses_registration_contract_and_actionable_retry_errors(self):
         self.assertIn("/api/registrations/${encodeURIComponent(registrationId)}/pass", self.event_pass_js)
