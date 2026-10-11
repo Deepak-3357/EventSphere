@@ -1,25 +1,15 @@
-# React preview deployment
+# React preview retired
 
-Deploy `frontend-app/` as a separate Render Static Site:
+The experimental React frontend previously lived in `frontend-app/`. It has
+been retired and is no longer part of EventSphere. Do not create a Render
+Static Site for it or change the production service to use it.
 
-- Root directory: `frontend-app`
-- Build command: `npm ci && npm run build`
-- Publish directory: `dist`
-- Optional build environment variable: `VITE_API_BASE_URL=https://eventspherebackend-azkp.onrender.com`
+The production frontend is the original static site in `frontend/`. Keep its
+existing Render Static Site configuration and publish directory unchanged.
+The Flask backend remains a separate service, with its existing production
+origin and exact CORS allowlist.
 
-The React API client already defaults non-local hosts to the deployed EventSphere backend and uses `http://127.0.0.1:5000` for local development. The build variable is recommended for an explicit preview configuration and must contain only the public API origin.
-
-Because the app uses client-side routes, configure the static host to serve `dist/index.html` for these preview paths:
-
-`/`, `/events/*`, `/student/*`, `/organizer/*`, `/admin/*`, `/login/*`, `/register/*`, `/auth/callback/*`.
-
-Do not expose database credentials, service-role keys, signing secrets, or encryption keys as Vite variables. The browser receives only the Supabase URL and publishable key through the existing public configuration endpoint.
-
-The backend keeps the existing `FRONTEND_ORIGIN` setting and always allows the existing production frontend origin. After Render creates the preview, add its exact origin to the comma-delimited `FRONTEND_ALLOWED_ORIGINS` environment variable, for example:
-
-```text
-FRONTEND_ORIGIN=https://eventsphere-395t.onrender.com
-FRONTEND_ALLOWED_ORIGINS=https://preview.example.com
-```
-
-Only exact HTTP(S) origins are accepted; wildcards, paths, query strings, and substring matches are rejected. Supabase Auth must allow the preview origin and `/auth/callback/` as a redirect URL when Google OAuth is enabled.
+The original frontend uses the existing Supabase session model, Flask bearer
+authentication, QR attendance flow, six-digit attendance codes, and OD-letter
+workflow. Keep signing secrets, database credentials, and service-role keys
+server-side.

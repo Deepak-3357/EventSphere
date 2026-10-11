@@ -26,6 +26,7 @@ class ProductionQrPdfRegressionTestCase(unittest.TestCase):
         cls.event_pass_html = (ROOT / "frontend" / "student" / "event-pass" / "index.html").read_text(encoding="utf-8")
         cls.od_letter_js = (ROOT / "frontend" / "assets" / "js" / "od-letter.js").read_text(encoding="utf-8")
         cls.attendance_scanner_js = (ROOT / "frontend" / "assets" / "js" / "attendance-scanner.js").read_text(encoding="utf-8")
+        cls.attendance_html = (ROOT / "frontend" / "organizer" / "attendance" / "index.html").read_text(encoding="utf-8")
 
     def test_signed_payload_generates_a_valid_png_for_the_scanner(self):
         registration_id = str(uuid.uuid4())
@@ -98,6 +99,17 @@ class ProductionQrPdfRegressionTestCase(unittest.TestCase):
         self.assertIn("fetchWithTimeout", self.attendance_scanner_js)
         self.assertIn('error.name === "AbortError"', self.attendance_scanner_js)
         self.assertIn("finally", self.attendance_scanner_js)
+
+    def test_original_scanner_has_retry_safe_camera_cleanup_and_manual_code_contract(self):
+        self.assertIn('id="manualCodeForm"', self.attendance_html)
+        self.assertIn('id="attendanceCode"', self.attendance_html)
+        self.assertIn('maxlength="6"', self.attendance_html)
+        self.assertIn("clearScanner", self.attendance_scanner_js)
+        self.assertIn("await clearScanner();", self.attendance_scanner_js)
+        self.assertIn('apiUrl("/api/attendance/manual-check-in")', self.attendance_scanner_js)
+        self.assertIn('body: JSON.stringify({ event_id: eventSelect.value, code })', self.attendance_scanner_js)
+        self.assertIn('if (!/^\\d{6}$/.test(code))', self.attendance_scanner_js)
+        self.assertIn('id="scannerMessage" class="scanner-message', self.attendance_html)
 
 
 if __name__ == "__main__":

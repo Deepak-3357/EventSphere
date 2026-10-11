@@ -6,7 +6,11 @@ let qrScanner;
 let checkInInProgress = false;
 
 function scannerRole() { return window.location.pathname.includes("/admin/") ? "admin" : "organizer"; }
-function showScannerMessage(message, danger = false) { scannerMessage.className = `small mt-3 ${danger ? "text-danger" : "text-success"}`; scannerMessage.textContent = message; }
+function showScannerMessage(message, danger = false) {
+  scannerMessage.className = `scanner-message small mt-3 ${danger ? "text-danger" : "text-success"}`;
+  scannerMessage.dataset.state = danger ? "error" : (message.toLowerCase().includes("verifying") ? "pending" : "success");
+  scannerMessage.textContent = message;
+}
 function normalizeDecodedPayload(decodedText) {
   let candidate = String(decodedText || "").trim();
   if (!candidate) throw new Error("The scanned QR code is empty.");
@@ -49,6 +53,13 @@ async function loadAttendance(session) {
   const response = await fetch(apiUrl(`/api/events/${eventSelect.value}/attendance`), { headers: { Authorization: `Bearer ${session.access_token}` } });
   const body = await response.json(); if (!response.ok) throw new Error(body.error?.message || "Attendance could not be loaded."); renderAttendance(body.data);
 }
+async function clearScanner() {
+  const activeScanner = qrScanner;
+  qrScanner = null;
+  if (!activeScanner) return;
+  try { await activeScanner.stop(); } catch (_) { /* The camera may already have stopped. */ }
+  try { activeScanner.clear(); } catch (_) { /* The reader may already be empty. */ }
+}
 (async () => {
   try {
     const client = await getSupabaseClient(); const session = (await client.auth.getSession()).data.session;
@@ -59,8 +70,9 @@ async function loadAttendance(session) {
     eventSelect.addEventListener("change", () => loadAttendance(session).catch((error) => showScannerMessage(error.message, true)));
     document.querySelector("#startScanner").addEventListener("click", async () => {
       if (qrScanner) return;
-      qrScanner = new Html5Qrcode("reader"); showScannerMessage("Camera active. Point it at a student event pass.");
-      await qrScanner.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, async (decodedText) => {
+      const activeScanner = new Html5Qrcode("reader"); qrScanner = activeScanner;
+      showScannerMessage("Camera active. Point it at a student event pass.");
+      try { await activeScanner.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, async (decodedText) => {
         if (checkInInProgress) return;
         checkInInProgress = true;
         showScannerMessage("QR detected. Verifying attendance…");
@@ -86,8 +98,32 @@ async function loadAttendance(session) {
         } finally {
           checkInInProgress = false;
         }
-      });
+      }); } catch (error) {
+        await clearScanner();
+        showScannerMessage(error.message || "The camera could not be started. Check camera permissions and try again.", true);
+      }
     });
-    document.querySelector("#stopScanner").addEventListener("click", async () => { if (qrScanner) { await qrScanner.stop(); qrScanner.clear(); qrScanner = null; showScannerMessage("Scanner stopped."); } });
+    document.querySelector("#stopScanner").addEventListener("click", async () => { await clearScanner(); showScannerMessage("Scanner stopped."); });
+    document.querySelector("#manualCodeForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (checkInInProgress) return;
+      const code = document.querySelector("#attendanceCode").value.trim();
+      if (!eventSelect.value) { showScannerMessage("Select an event before verifying an attendance code.", true); return; }
+      if (!/^\d{6}$/.test(code)) { showScannerMessage("Enter the six-digit attendance code from the event pass.", true); return; }
+      checkInInProgress = true;
+      showScannerMessage("Attendance code detected. Verifying attendance…");
+      try {
+        const response = await fetchWithTimeout(apiUrl("/api/attendance/manual-check-in"), { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ event_id: eventSelect.value, code }) });
+        const result = await response.json().catch(() => ({}));
+        const attendance = result.data;
+        if (!response.ok || result.success !== true || !attendance?.attendance_id || attendance.status !== "present") throw new Error(result.error?.message || `Attendance could not be recorded (HTTP ${response.status}).`);
+        document.querySelector("#attendanceCode").value = "";
+        showScannerMessage("Check-in recorded.");
+        try { await loadAttendance(session); } catch (error) { showScannerMessage(`Check-in recorded, but the attendance list could not be refreshed: ${error.message}`, true); }
+      } catch (error) {
+        const message = error.name === "AbortError" ? "Attendance verification timed out. Check the connection and try again." : (error.message || "Attendance could not be recorded. Please try again.");
+        showScannerMessage(message, true);
+      } finally { checkInInProgress = false; }
+    });
   } catch (error) { showScannerMessage(error.message, true); }
 })();

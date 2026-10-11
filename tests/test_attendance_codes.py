@@ -45,12 +45,14 @@ class AttendanceCodeContractTestCase(unittest.TestCase):
         route = (ROOT / "backend/app/routes/attendance.py").read_text(encoding="utf-8")
         service = (ROOT / "backend/app/services/attendance_service.py").read_text(encoding="utf-8")
         migration = (ROOT / "supabase/migrations/20261011100000_attendance_codes.sql").read_text(encoding="utf-8")
-        page = (ROOT / "frontend-app/src/pages/AttendancePage.jsx").read_text(encoding="utf-8")
+        page = (ROOT / "frontend" / "assets" / "js" / "attendance-scanner.js").read_text(encoding="utf-8")
+        attendance_html = (ROOT / "frontend" / "organizer" / "attendance" / "index.html").read_text(encoding="utf-8")
         self.assertIn("/attendance/manual-check-in", route)
         self.assertIn("_record_attendance", service)
         self.assertIn("attendance_codes_event_hash_unique", migration)
-        self.assertIn("004281", page)
+        self.assertIn("manual-check-in", page)
         self.assertIn("finally", page)
+        self.assertIn('id="manualCodeForm"', attendance_html)
 
 
 class AttendanceCodeIntegrationTestCase(unittest.TestCase):
