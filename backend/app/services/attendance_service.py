@@ -7,6 +7,7 @@ import io
 import json
 from datetime import datetime, timedelta
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import qrcode
 from flask import current_app
@@ -88,11 +89,15 @@ def _verify_payload(raw_payload):
 
 
 def _window_is_open(event_date, start_time, end_time):
-    now = datetime.now()
-    start = datetime.combine(event_date, start_time) - timedelta(
+    try:
+        timezone = ZoneInfo(current_app.config.get("ATTENDANCE_TIMEZONE", "Asia/Kolkata"))
+    except ZoneInfoNotFoundError:
+        raise AttendanceError("CONFIGURATION_ERROR", "Attendance timezone is invalid", 500)
+    now = datetime.now(timezone)
+    start = datetime.combine(event_date, start_time, tzinfo=timezone) - timedelta(
         minutes=int(current_app.config.get("ATTENDANCE_EARLY_MINUTES", 30))
     )
-    end = datetime.combine(event_date, end_time) + timedelta(
+    end = datetime.combine(event_date, end_time, tzinfo=timezone) + timedelta(
         minutes=int(current_app.config.get("ATTENDANCE_LATE_MINUTES", 120))
     )
     return start <= now <= end

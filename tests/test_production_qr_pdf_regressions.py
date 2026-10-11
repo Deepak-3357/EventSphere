@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
 from app import create_app  # noqa: E402
-from app.services.attendance_service import _qr_image_data_url, _signed_payload, _verify_payload  # noqa: E402
+from app.services.attendance_service import _qr_image_data_url, _signed_payload, _verify_payload, _window_is_open  # noqa: E402
 
 
 class ProductionQrPdfRegressionTestCase(unittest.TestCase):
@@ -39,6 +39,16 @@ class ProductionQrPdfRegressionTestCase(unittest.TestCase):
             self.assertGreater(image.width, 0)
         self.assertEqual(verified_registration_id, registration_id)
         self.assertEqual(json.loads(payload)["type"], "eventsphere_attendance")
+
+    def test_attendance_window_uses_configured_campus_timezone(self):
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        timezone = ZoneInfo("Asia/Kolkata")
+        now = datetime.now(timezone)
+        with self.app.app_context():
+            self.app.config.update(ATTENDANCE_TIMEZONE="Asia/Kolkata", ATTENDANCE_EARLY_MINUTES=30, ATTENDANCE_LATE_MINUTES=120)
+            self.assertTrue(_window_is_open(now.date(), (now - timedelta(minutes=5)).time(), (now + timedelta(minutes=5)).time()))
 
     def test_event_pass_uses_backend_qr_image_and_handles_failures(self):
         self.assertNotIn("qrcode@", self.event_pass_html)
