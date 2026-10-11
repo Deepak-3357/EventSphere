@@ -7,6 +7,24 @@ let checkInInProgress = false;
 
 function scannerRole() { return window.location.pathname.includes("/admin/") ? "admin" : "organizer"; }
 function showScannerMessage(message, danger = false) { scannerMessage.className = `small mt-3 ${danger ? "text-danger" : "text-success"}`; scannerMessage.textContent = message; }
+function normalizeDecodedPayload(decodedText) {
+  let candidate = String(decodedText || "").trim();
+  if (!candidate) throw new Error("The scanned QR code is empty.");
+  try {
+    let document = JSON.parse(candidate);
+    if (typeof document === "string") {
+      candidate = document.trim();
+      document = JSON.parse(candidate);
+    }
+    if (!document || Array.isArray(document) || document.type !== "eventsphere_attendance"
+      || typeof document.registration_id !== "string" || typeof document.token !== "string") {
+      throw new Error("invalid attendance payload");
+    }
+  } catch (_) {
+    throw new Error("The scanned QR code is not a valid EventSphere attendance pass.");
+  }
+  return candidate;
+}
 async function fetchWithTimeout(url, options, timeoutMs = 15000) {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -47,7 +65,8 @@ async function loadAttendance(session) {
         checkInInProgress = true;
         showScannerMessage("QR detected. Verifying attendance…");
         try {
-          const response = await fetchWithTimeout(apiUrl("/api/attendance/check-in"), { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ qr_payload: decodedText }) });
+          const qrPayload = normalizeDecodedPayload(decodedText);
+          const response = await fetchWithTimeout(apiUrl("/api/attendance/check-in"), { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ qr_payload: qrPayload }) });
           const result = await response.json().catch(() => ({}));
           const attendance = result.data;
           if (!response.ok || result.success !== true || !attendance?.attendance_id || attendance.status !== "present") {

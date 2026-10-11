@@ -73,8 +73,11 @@ class ProductionQrPdfRegressionTestCase(unittest.TestCase):
         self.assertEqual(set(document), {"registration_id", "token", "type"})
         self.assertEqual(document["registration_id"], registration_id)
         self.assertEqual(document["type"], "eventsphere_attendance")
-        self.assertIn('JSON.stringify({ qr_payload: decodedText })', self.attendance_scanner_js)
+        self.assertIn('JSON.stringify({ qr_payload: qrPayload })', self.attendance_scanner_js)
         self.assertNotIn('JSON.stringify({ qr_payload: JSON.stringify', self.attendance_scanner_js)
+        self.assertIn("normalizeDecodedPayload(decodedText)", self.attendance_scanner_js)
+        self.assertIn('typeof document === "string"', self.attendance_scanner_js)
+        self.assertIn("not a valid EventSphere attendance pass", self.attendance_scanner_js)
 
     def test_od_download_validates_status_content_type_and_pdf_signature(self):
         self.assertIn("apiUrl(\"/api\")", self.od_letter_js)
