@@ -54,6 +54,19 @@ class RoleNavigationRegressionTestCase(unittest.TestCase):
             self.assertIn("EventSphere", page)
             self.assertIn("Dashboard", page)
 
+    def test_role_home_routes_have_deployable_static_entry_files(self):
+        expected_targets = {
+            "student": "../dashboard/student/",
+            "organizer": "../dashboard/organizer/",
+            "admin": "../dashboard/admin/",
+        }
+        for role, target in expected_targets.items():
+            route_file = FRONTEND / role / "index.html"
+            self.assertTrue(route_file.is_file(), f"Missing static route entry: {route_file}")
+            route = route_file.read_text(encoding="utf-8")
+            self.assertIn(f'url={target}', route)
+            self.assertIn(f'window.location.replace("{target}")', route)
+
 
 if __name__ == "__main__":
     unittest.main()
