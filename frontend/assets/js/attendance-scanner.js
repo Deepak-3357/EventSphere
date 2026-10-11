@@ -24,7 +24,7 @@ async function loadAttendance(session) {
 (async () => {
   try {
     const client = await getSupabaseClient(); const session = (await client.auth.getSession()).data.session;
-    if (!session) { window.location.href = "../../login/"; return; }
+    if (!session) { redirectToLogin(scannerRole()); return; }
     const events = await fetch(apiUrl("/api/events?limit=100"), { headers: { Authorization: `Bearer ${session.access_token}` } });
     const body = await events.json(); if (!events.ok) throw new Error(body.error?.message || "Events could not be loaded.");
     body.data.forEach((event) => { const option = document.createElement("option"); option.value = event.id; option.textContent = `${event.title} — ${event.event_date}`; eventSelect.append(option); });

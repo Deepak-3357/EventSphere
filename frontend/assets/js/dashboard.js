@@ -1,5 +1,15 @@
 const dashboardMessage = document.querySelector("#dashboardMessage");
 const role = window.location.pathname.includes("/student/") ? "student" : window.location.pathname.includes("/organizer/") ? "organizer" : "admin";
+if (role === "organizer") {
+  const nav = document.querySelector(".dashboard-sidebar .nav");
+  if (nav) {
+    const link = document.createElement("a");
+    link.className = "nav-link";
+    link.href = "../../organizer/events/";
+    link.textContent = "Manage Events";
+    nav.insertBefore(link, nav.children[1] || null);
+  }
+}
 const apiBase = `${eventSphereApiBase}/api`;
 function text(id, value) { const node = document.querySelector(`#${id}`); if (node) node.textContent = value ?? "—"; }
 function badge(value) { const node = document.createElement("span"); node.className = "badge text-bg-secondary"; node.textContent = value || "—"; return node; }
@@ -23,16 +33,32 @@ function renderAdmin(data) {
   Object.entries(data.stats).forEach(([key, value]) => text(`stat${key.replace(/(^|_)(\w)/g, (_, a, b) => b.toUpperCase())}`, value));
   if (window.Chart) new Chart(document.querySelector("#analyticsChart"), { type: "bar", data: { labels: data.analytics.events_by_category.map((x) => x.name), datasets: [{ label: "Events", data: data.analytics.events_by_category.map((x) => x.count), backgroundColor: "#315efb" }] }, options: { responsive: true, scales: { y: { beginAtZero: true } } } });
 }
+async function setupMasterAdmin(session, profile) {
+  if (role !== "admin" || profile.is_master_admin !== true) return;
+  const main = document.querySelector("main");
+  if (!main) return;
+  const section = document.createElement("section");
+  section.className = "card border-0 shadow-sm mt-4";
+  section.innerHTML = `<div class="card-body"><div class="d-flex justify-content-between align-items-center flex-wrap gap-2"><div><h2 class="h5 mb-1">Master Admin · User management</h2><p class="small text-secondary mb-0">Create organizer and ordinary admin accounts. Student accounts remain public-registration only.</p></div><span class="badge text-bg-dark">Single Master Admin</span></div><div id="adminUserMessage" class="small mt-3" role="status"></div><div class="row g-2 mt-2"><div class="col-md-6"><label class="visually-hidden" for="adminUserSearch">Search users</label><input id="adminUserSearch" class="form-control" placeholder="Search by name or email"></div><div class="col-md-3"><label class="visually-hidden" for="adminUserRole">Filter role</label><select id="adminUserRole" class="form-select"><option value="">All roles</option><option value="student">Students</option><option value="organizer">Organizers</option><option value="admin">Admins</option></select></div></div><div class="table-responsive mt-3"><table class="table table-sm align-middle"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Master</th></tr></thead><tbody id="adminUserRows"></tbody></table></div><hr><h3 class="h6">Create privileged account</h3><form id="privilegedUserForm" class="row g-2"><div class="col-md-3"><label class="visually-hidden" for="newUserName">Full name</label><input id="newUserName" class="form-control" placeholder="Full name" required></div><div class="col-md-3"><label class="visually-hidden" for="newUserEmail">Email</label><input id="newUserEmail" class="form-control" type="email" placeholder="Email" required></div><div class="col-md-2"><label class="visually-hidden" for="newUserRole">Role</label><select id="newUserRole" class="form-select"><option value="organizer">Organizer</option><option value="admin">Ordinary Admin</option></select></div><div class="col-md-2"><label class="visually-hidden" for="newUserPassword">Initial password</label><input id="newUserPassword" class="form-control" type="password" minlength="6" placeholder="Initial password" required></div><div class="col-md-2"><button class="btn btn-dark w-100" type="submit">Create account</button></div></form></div>`;
+  main.append(section);
+  const message = section.querySelector("#adminUserMessage"); const rows = section.querySelector("#adminUserRows");
+  const loadUsers = async () => { const query = new URLSearchParams({ search: section.querySelector("#adminUserSearch").value, role: section.querySelector("#adminUserRole").value }); const response = await fetch(`${apiBase}/admin/users?${query}`, { headers: { Authorization: `Bearer ${session.access_token}` } }); const body = await response.json(); if (!response.ok) throw new Error(body.error?.message || "Users could not be loaded."); rows.replaceChildren(); body.data.forEach((user) => { const row = document.createElement("tr"); [user.full_name, user.email, user.role, user.is_master_admin ? "Yes" : "No"].forEach((value) => { const cell = document.createElement("td"); cell.textContent = value; row.append(cell); }); rows.append(row); }); if (!body.data.length) { const row = document.createElement("tr"); const cell = document.createElement("td"); cell.colSpan = 4; cell.className = "text-secondary"; cell.textContent = "No matching users."; row.append(cell); rows.append(row); } };
+  section.querySelector("#adminUserSearch").addEventListener("input", () => loadUsers().catch((error) => { message.textContent = error.message; })); section.querySelector("#adminUserRole").addEventListener("change", () => loadUsers().catch((error) => { message.textContent = error.message; }));
+  section.querySelector("#privilegedUserForm").addEventListener("submit", async (event) => { event.preventDefault(); const button = event.target.querySelector("button"); button.disabled = true; try { const response = await fetch(`${apiBase}/admin/users`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ full_name: section.querySelector("#newUserName").value, email: section.querySelector("#newUserEmail").value, role: section.querySelector("#newUserRole").value, password: section.querySelector("#newUserPassword").value }) }); const body = await response.json(); if (!response.ok) throw new Error(body.error?.message || "Account could not be created."); message.className = "small text-success mt-3"; message.textContent = "Account created and role verified."; event.target.reset(); await loadUsers(); } catch (error) { message.className = "small text-danger mt-3"; message.textContent = error.message; } finally { button.disabled = false; } });
+  try { await loadUsers(); } catch (error) { message.className = "small text-danger mt-3"; message.textContent = error.message; }
+}
 (async () => {
   try {
     const client = await getSupabaseClient(); const session = (await client.auth.getSession()).data.session;
-    if (!session) { window.location.href = "../../login/"; return; }
+    if (!session) { redirectToLogin(role); return; }
     const profileResponse = await fetch(`${apiBase}/auth/me`, { headers: { Authorization: `Bearer ${session.access_token}` } }); const profileBody = await profileResponse.json();
-    if (!profileResponse.ok || profileBody.profile.role !== role) throw new Error("This dashboard is not available for your role.");
+    if (!profileResponse.ok) throw new Error(profileBody.error?.message || "Unable to verify your role.");
+    if (profileBody.profile.role !== role) { window.location.replace(roleHomePath(profileBody.profile.role)); return; }
     text("welcomeName", profileBody.profile.full_name); text("profileName", profileBody.profile.full_name); text("profileRole", role);
+    await setupMasterAdmin(session, profileBody.profile);
     const response = await fetch(`${apiBase}/dashboard/${role}`, { headers: { Authorization: `Bearer ${session.access_token}` } }); const body = await response.json(); if (!response.ok) throw new Error(body.error?.message || "Unable to load dashboard data.");
     if (role === "student") renderStudent(body.data); else if (role === "organizer") renderOrganizer(body.data); else renderAdmin(body.data);
     const unread = await fetch(`${apiBase}/notifications/unread-count`, { headers: { Authorization: `Bearer ${session.access_token}` } }); if (unread.ok) text("notificationCount", (await unread.json()).data.unread_count);
-    document.querySelector("#logoutButton").addEventListener("click", async () => { await client.auth.signOut(); window.location.href = "../../login/"; }); dashboardMessage.classList.add("d-none");
+    document.querySelector("#logoutButton").addEventListener("click", signOutAndRedirect); dashboardMessage.classList.add("d-none");
   } catch (error) { dashboardMessage.className = "alert alert-danger"; dashboardMessage.textContent = error.message; }
 })();

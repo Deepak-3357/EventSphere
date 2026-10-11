@@ -1,70 +1,39 @@
 const detailElement = document.querySelector("#eventDetail");
 const eventId = new URLSearchParams(window.location.search).get("id");
-
-function detailEscape(value) {
-  return String(value ?? "").replace(/[&<>'"]/g, (character) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"}[character]));
-}
+function detailEscape(value) { return String(value ?? "").replace(/[&<>'"]/g, (character) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[character])); }
 
 async function loadEvent() {
   if (!eventId) throw new Error("An event ID is required.");
   let session = null;
-  let client = null;
-  try {
-    client = await getSupabaseClient();
-    session = (await client.auth.getSession()).data.session;
-  } catch (_) {
-    // Public event details remain available if Auth configuration is unavailable.
-  }
-  const headers = session ? { Authorization: `Bearer ${session.access_token}` } : {};
-  const response = await fetch(apiUrl(`/api/events/${encodeURIComponent(eventId)}`), { headers });
+  try { const client = await getSupabaseClient(); session = (await client.auth.getSession()).data.session; } catch (_) { /* Public details remain available. */ }
+  const response = await fetch(apiUrl(`/api/events/${encodeURIComponent(eventId)}`), { headers: session ? { Authorization: `Bearer ${session.access_token}` } : {} });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error?.message || "Event could not be loaded.");
   const event = body.data;
   const open = event.status === "published" && event.available_seats > 0 && new Date(event.registration_deadline) > new Date();
-  detailElement.innerHTML = `<div class="card border-0 shadow-sm"><div class="card-body p-4 p-lg-5">
-    <span class="badge text-bg-primary mb-3">${detailEscape(event.category.name)}</span>
-    <h1 class="h2">${detailEscape(event.title)}</h1>
-    <p class="text-secondary">${detailEscape(event.description)}</p>
-    <div class="row g-3 small mb-4"><div class="col-md-6"><strong>Date:</strong> ${detailEscape(event.event_date)} ${detailEscape(event.start_time)}–${detailEscape(event.end_time)}</div><div class="col-md-6"><strong>Venue:</strong> ${detailEscape(event.venue.name)}</div><div class="col-md-6"><strong>Seats:</strong> ${event.available_seats} available of ${event.capacity}</div><div class="col-md-6"><strong>Deadline:</strong> ${detailEscape(event.registration_deadline)}</div></div>
-    <div id="registrationState" class="mb-3"></div>
-    <button class="btn btn-primary" id="registerButton" ${open ? "" : "disabled"}>Register</button>
-    <p class="small text-secondary mt-3 mb-0">${open ? "Registration Open" : event.available_seats === 0 ? "Event Full" : "Registration Closed"}</p>
-  </div></div>`;
-  const state = document.querySelector("#registrationState");
-  const button = document.querySelector("#registerButton");
-  if (!session) {
-    button.textContent = "Sign in to register";
-    button.disabled = false;
-    button.onclick = () => { window.location.href = "../login/"; };
-    return;
-  }
-  if (event.is_registered) {
-    state.innerHTML = '<span class="badge text-bg-success">Registered ✓</span>';
-    button.textContent = "Cancel registration";
-    button.className = "btn btn-outline-danger";
-    button.disabled = false;
-    button.onclick = () => updateRegistration("DELETE", session, button, state);
-  } else {
-    button.onclick = () => updateRegistration("POST", session, button, state);
-  }
+  let faqs = [];
+  try { const faqResponse = await fetch(apiUrl(`/api/events/${encodeURIComponent(eventId)}/faqs`)); if (faqResponse.ok) faqs = (await faqResponse.json()).data || []; } catch (_) { /* Details remain usable. */ }
+  const faqMarkup = faqs.length ? faqs.map((faq, index) => `<div class="accordion-item"><h3 class="accordion-header"><button class="accordion-button ${index ? "collapsed" : ""}" type="button" data-bs-toggle="collapse" data-bs-target="#faq-${index}" aria-expanded="${index ? "false" : "true"}">${detailEscape(faq.question)}</button></h3><div id="faq-${index}" class="accordion-collapse collapse ${index ? "" : "show"}"><div class="accordion-body">${detailEscape(faq.answer)}</div></div></div>`).join("") : '<p class="text-secondary mb-0">The organizer has not added event FAQs yet.</p>';
+  const participation = event.participation_mode === "individual" ? "Individual participation" : event.participation_mode === "team" ? `Team participation (${event.min_team_size}–${event.max_team_size} members)` : `Individual or team participation (${event.min_team_size}–${event.max_team_size} members)`;
+  const modeControl = event.participation_mode === "both" ? `<label class="form-label" for="participationType">Registration type</label><select id="participationType" class="form-select mb-2"><option value="individual">Individual</option><option value="team">Team</option></select>` : "";
+  detailElement.innerHTML = `<div class="card border-0 shadow-sm overflow-hidden"><img class="event-hero" src="${detailEscape(event.image_url || "../assets/img/event-fallback.svg")}" alt="Cover image for ${detailEscape(event.title)}" onerror="this.onerror=null;this.src='../assets/img/event-fallback.svg';"><div class="card-body p-4 p-lg-5"><span class="badge text-bg-primary mb-3">${detailEscape(event.category.name)}</span><h1 class="h2">${detailEscape(event.title)}</h1><p class="text-secondary">${detailEscape(event.description)}</p><div class="row g-3 small mb-4"><div class="col-md-6"><strong>Date:</strong> ${detailEscape(event.event_date)} ${detailEscape(event.start_time)}–${detailEscape(event.end_time)}</div><div class="col-md-6"><strong>Venue:</strong> ${detailEscape(event.venue.name)}</div><div class="col-md-6"><strong>Seats:</strong> <span id="availableSeats">${event.available_seats}</span> available of ${event.capacity}</div><div class="col-md-6"><strong>Deadline:</strong> ${detailEscape(event.registration_deadline)}</div></div><section class="detail-section"><h2 class="h5">Participation</h2><p>${detailEscape(participation)}</p>${event.eligibility ? `<p><strong>Eligibility:</strong> ${detailEscape(event.eligibility)}</p>` : ""}${event.registration_instructions ? `<p><strong>Registration instructions:</strong> ${detailEscape(event.registration_instructions)}</p>` : ""}</section><section class="detail-section"><h2 class="h5">Facilities</h2><div class="row g-2">${Object.entries(event.facilities || {}).map(([key, value]) => `<div class="col-md-4"><div class="facility-card"><strong>${detailEscape(key)}</strong><div>${detailEscape(value)}</div></div></div>`).join("") || '<div class="col-12 text-secondary">Facility details will be shared by the organizer.</div>'}</div></section><section class="detail-section"><h2 class="h5">Frequently asked questions</h2><div class="accordion">${faqMarkup}</div></section><div id="registrationState" class="mb-3"></div><div id="registrationControls">${modeControl}<button class="btn btn-primary" id="registerButton" ${open ? "" : "disabled"}>Register</button>${event.participation_mode !== "individual" ? `<div id="teamForm" class="border rounded p-3 mt-3 d-none"><label class="form-label" for="teamName">Team name</label><input id="teamName" class="form-control mb-2" maxlength="120"><p class="small text-secondary">Your verified profile is included as team leader. Add ${event.min_team_size - 1} to ${event.max_team_size - 1} teammates.</p><div id="memberFields"></div><button type="button" class="btn btn-sm btn-outline-secondary" id="addMemberButton">Add teammate</button><div id="teamReview" class="alert alert-light mt-3 d-none"></div><button type="button" class="btn btn-primary mt-2" id="reviewTeamButton">Review team</button><button type="button" class="btn btn-success mt-2 d-none" id="submitTeamButton">Confirm team registration</button></div>` : ""}</div><p class="small text-secondary mt-3 mb-0">${open ? "Registration Open" : event.available_seats === 0 ? "Event Full" : "Registration Closed"}</p></div></div>`;
+  const state = document.querySelector("#registrationState"); const button = document.querySelector("#registerButton");
+  if (!session) { button.textContent = "Sign in to register"; button.disabled = false; button.onclick = () => redirectToLogin("student"); return; }
+  if (event.is_registered) { state.innerHTML = '<span class="badge text-bg-success">Registered ✓</span>'; button.textContent = "Cancel registration"; button.className = "btn btn-outline-danger"; button.disabled = false; button.onclick = () => updateRegistration("DELETE", session, button, state); return; }
+  const typeSelect = document.querySelector("#participationType"); const team = document.querySelector("#teamForm");
+  const selectType = () => { const type = typeSelect ? typeSelect.value : event.participation_mode; if (team) team.classList.toggle("d-none", type !== "team"); button.classList.toggle("d-none", type === "team"); };
+  typeSelect?.addEventListener("change", selectType); selectType(); button.onclick = () => updateRegistration("POST", session, button, state, { participation_type: "individual" });
+  if (team) setupTeamForm(event, session, state);
 }
 
-async function updateRegistration(method, session, button, state) {
-  button.disabled = true;
-  button.textContent = "Please wait…";
-  const response = await fetch(apiUrl(`/api/events/${encodeURIComponent(eventId)}/register`), { method, headers: { Authorization: `Bearer ${session.access_token}` } });
-  const body = await response.json();
-  if (!response.ok) {
-    state.innerHTML = `<span class="text-danger">${detailEscape(body.error?.message || "Registration could not be completed.")}</span>`;
-    button.disabled = false;
-    button.textContent = method === "POST" ? "Register" : "Cancel registration";
-    return;
-  }
-  state.innerHTML = `<span class="badge text-bg-${method === "POST" ? "success" : "secondary"}">${method === "POST" ? "Registered ✓" : "Registration Cancelled"}</span>`;
-  button.textContent = method === "POST" ? "Cancel registration" : "Register again";
-  button.className = method === "POST" ? "btn btn-outline-danger" : "btn btn-primary";
-  button.disabled = false;
-  button.onclick = () => updateRegistration(method === "POST" ? "DELETE" : "POST", session, button, state);
+function setupTeamForm(event, session, state) {
+  const fields = document.querySelector("#memberFields"); let count = 0;
+  const add = () => { if (count >= event.max_team_size - 1) return; count += 1; const wrapper = document.createElement("div"); wrapper.className = "row g-2 mb-2 team-member"; wrapper.innerHTML = `<div class="col-md-5"><label class="visually-hidden">Member name</label><input class="form-control member-name" placeholder="Member ${count} name" required></div><div class="col-md-5"><label class="visually-hidden">Member email</label><input class="form-control member-email" type="email" placeholder="Member email" required></div><div class="col-md-2"><button type="button" class="btn btn-outline-danger w-100 remove-member">Remove</button></div>`; wrapper.querySelector(".remove-member").onclick = () => { wrapper.remove(); count -= 1; }; fields.append(wrapper); };
+  for (let i = 0; i < event.min_team_size - 1; i += 1) add();
+  document.querySelector("#addMemberButton").onclick = add;
+  document.querySelector("#reviewTeamButton").onclick = () => { const members = [...document.querySelectorAll(".team-member")].map((row) => ({ full_name: row.querySelector(".member-name").value.trim(), email: row.querySelector(".member-email").value.trim() })); const review = document.querySelector("#teamReview"); review.textContent = `Review: ${document.querySelector("#teamName").value.trim()} with ${members.length + 1} total members. Confirm only after checking the team details.`; review.classList.remove("d-none"); document.querySelector("#submitTeamButton").classList.remove("d-none"); };
+  document.querySelector("#submitTeamButton").onclick = () => { const members = [...document.querySelectorAll(".team-member")].map((row) => ({ full_name: row.querySelector(".member-name").value.trim(), email: row.querySelector(".member-email").value.trim() })); updateRegistration("POST", session, document.querySelector("#submitTeamButton"), state, { participation_type: "team", team: { name: document.querySelector("#teamName").value.trim(), members } }); };
 }
 
+async function updateRegistration(method, session, button, state, payload = {}) { button.disabled = true; button.textContent = "Please wait…"; const options = { method, headers: { Authorization: `Bearer ${session.access_token}` } }; if (method === "POST") { options.headers["Content-Type"] = "application/json"; options.body = JSON.stringify(payload); } const response = await fetch(apiUrl(`/api/events/${encodeURIComponent(eventId)}/register`), options); const body = await response.json(); if (!response.ok) { state.innerHTML = `<span class="text-danger">${detailEscape(body.error?.message || "Registration could not be completed.")}</span>`; button.disabled = false; button.textContent = method === "POST" ? "Confirm registration" : "Cancel registration"; return; } state.innerHTML = `<span class="badge text-bg-${method === "POST" ? "success" : "secondary"}">${method === "POST" ? "Registered ✓" : "Registration Cancelled"}</span>`; const availability = await fetch(apiUrl(`/api/events/${encodeURIComponent(eventId)}`)); if (availability.ok) { const refreshed = await availability.json(); const availableSeats = document.querySelector("#availableSeats"); if (availableSeats) availableSeats.textContent = refreshed.data.available_seats; } button.textContent = method === "POST" ? "Cancel registration" : "Register again"; button.className = method === "POST" ? "btn btn-outline-danger" : "btn btn-primary"; button.disabled = false; button.onclick = () => updateRegistration(method === "POST" ? "DELETE" : "POST", session, button, state, payload); }
 loadEvent().catch((error) => { detailElement.innerHTML = `<div class="alert alert-danger">${detailEscape(error.message)}</div>`; });

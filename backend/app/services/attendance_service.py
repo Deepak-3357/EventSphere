@@ -3,10 +3,12 @@
 import base64
 import hashlib
 import hmac
+import io
 import json
 from datetime import datetime, timedelta
 from uuid import UUID
 
+import qrcode
 from flask import current_app
 from psycopg.errors import UniqueViolation
 
@@ -58,6 +60,16 @@ def _signed_payload(registration_id):
     return json.dumps(document, separators=(",", ":"), sort_keys=True)
 
 
+def _qr_image_data_url(payload):
+    """Render the signed attendance payload as a browser-displayable PNG."""
+
+    image = qrcode.make(payload)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
 def _verify_payload(raw_payload):
     if not isinstance(raw_payload, str) or len(raw_payload) > 4096:
         raise AttendanceError("MALFORMED_QR", "QR payload is malformed", 400)
@@ -95,20 +107,24 @@ def get_event_pass(registration_id, student_id):
                 """select r.id, r.status, r.student_id, e.id, e.title, e.description,
                           e.event_date, e.start_time, e.end_time, e.status,
                           v.name, v.location, p.full_name, p.department, p.year,
-                          a.status, a.checked_in_at
+                          a.status, a.checked_in_at, r.participation_type, t.id, t.name,
+                          coalesce((select jsonb_agg(jsonb_build_object('full_name', tm.full_name, 'email', tm.email, 'position', tm.position) order by tm.position)
+                                    from team_members tm where tm.team_id = r.team_id), '[]'::jsonb)
                    from registrations r
                    join events e on e.id = r.event_id
                    join venues v on v.id = e.venue_id
                    join profiles p on p.id = r.student_id
+                   left join teams t on t.id = r.team_id
                    left join attendance a on a.registration_id = r.id
-                   where r.id = %s and r.student_id = %s""",
-                (registration_id, student_id),
+                   where r.id = %s and (r.student_id = %s or exists (select 1 from team_members tm where tm.team_id = r.team_id and tm.student_id = %s))""",
+                (registration_id, student_id, student_id),
             )
             row = cursor.fetchone()
             if not row:
                 raise AttendanceError("PASS_NOT_FOUND", "Event pass not found", 404)
             if row[1] != "registered" or row[9] != "published":
                 raise AttendanceError("PASS_UNAVAILABLE", "Event pass is unavailable for this registration", 409)
+            qr_payload = _signed_payload(registration_id)
             return {
                 "registration_id": str(row[0]),
                 "registration_status": row[1],
@@ -120,7 +136,10 @@ def get_event_pass(registration_id, student_id):
                 },
                 "student": {"name": row[12], "department": row[13], "year": row[14]},
                 "attendance": {"status": row[15] or "not_checked_in", "checked_in_at": _json_value(row[16])},
-                "qr_payload": _signed_payload(registration_id),
+                "participation_type": row[17],
+                "team": {"id": str(row[18]), "name": row[19], "members": row[20] or []} if row[17] == "team" else None,
+                "qr_payload": qr_payload,
+                "qr_image": _qr_image_data_url(qr_payload),
             }
 
 
@@ -174,8 +193,11 @@ def list_event_attendance(event_id):
                 raise AttendanceError("EVENT_NOT_FOUND", "Event not found", 404)
             cursor.execute(
                 """select r.id, r.status, p.full_name, p.email, p.department, p.year,
-                          a.status, a.checked_in_at
+                          a.status, a.checked_in_at, r.participation_type, t.name,
+                          coalesce((select jsonb_agg(jsonb_build_object('full_name', tm.full_name, 'email', tm.email) order by tm.position)
+                                    from team_members tm where tm.team_id=r.team_id), '[]'::jsonb)
                    from registrations r join profiles p on p.id = r.student_id
+                   left join teams t on t.id = r.team_id
                    left join attendance a on a.registration_id = r.id
                    where r.event_id = %s order by p.full_name asc""",
                 (event_id,),
@@ -184,7 +206,8 @@ def list_event_attendance(event_id):
             for row in cursor.fetchall():
                 attendees.append({"registration_id": str(row[0]), "registration_status": row[1],
                                   "student": {"name": row[2], "email": row[3], "department": row[4], "year": row[5]},
-                                  "attendance_status": row[6] or "absent", "checked_in_at": _json_value(row[7])})
+                                  "attendance_status": row[6] or "absent", "checked_in_at": _json_value(row[7]),
+                                  "participation_type": row[8], "team": {"name": row[9], "members": row[10] or []} if row[8] == "team" else None})
             registered = sum(1 for attendee in attendees if attendee["registration_status"] == "registered")
             checked_in = sum(1 for attendee in attendees if attendee["registration_status"] == "registered" and attendee["attendance_status"] == "present")
             return {"event": {"id": str(event[0]), "title": event[1], "event_date": _json_value(event[2]),

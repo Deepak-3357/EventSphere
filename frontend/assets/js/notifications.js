@@ -38,7 +38,7 @@ async function loadNotifications() {
   try {
     const client = await getSupabaseClient();
     windowNotificationSession = (await client.auth.getSession()).data.session;
-    if (!windowNotificationSession) { window.location.href = "../login/"; return; }
+    if (!windowNotificationSession) { redirectToLogin(); return; }
     await loadNotifications();
   } catch (error) { notificationMessage.className = "small text-danger"; notificationMessage.textContent = error.message; }
 })();

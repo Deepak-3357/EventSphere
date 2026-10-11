@@ -9,7 +9,7 @@ function registrationEscape(value) {
   try {
     const client = await getSupabaseClient();
     const session = (await client.auth.getSession()).data.session;
-    if (!session) { window.location.href = "../../login/"; return; }
+    if (!session) { redirectToLogin("student"); return; }
     const response = await fetch(apiUrl("/api/my-registrations"), { headers: { Authorization: `Bearer ${session.access_token}` } });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error?.message || "Registrations could not be loaded.");
