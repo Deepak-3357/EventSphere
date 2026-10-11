@@ -1,5 +1,11 @@
 let supabaseClientPromise;
-const eventSphereApiBase = (window.EVENTSPHERE_API_BASE_URL || "http://127.0.0.1:5000").replace(/\/$/, "");
+const localEventSphereApiBase = "http://127.0.0.1:5000";
+const productionEventSphereApiBase = "https://eventspherebackend-azkp.onrender.com";
+const localDevelopmentHosts = new Set(["", "localhost", "127.0.0.1"]);
+const defaultEventSphereApiBase = localDevelopmentHosts.has(window.location.hostname)
+  ? localEventSphereApiBase
+  : productionEventSphereApiBase;
+const eventSphereApiBase = (window.EVENTSPHERE_API_BASE_URL || defaultEventSphereApiBase).replace(/\/$/, "");
 function apiUrl(path) { return `${eventSphereApiBase}${path}`; }
 
 async function getSupabaseClient() {
