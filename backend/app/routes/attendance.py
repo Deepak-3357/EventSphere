@@ -1,5 +1,7 @@
 """Event pass and attendance scanner endpoints."""
 
+import logging
+
 from flask import Blueprint, g, request
 from psycopg import DatabaseError
 
@@ -9,6 +11,7 @@ from app.utils.responses import error, success
 
 
 attendance_bp = Blueprint("attendance", __name__)
+logger = logging.getLogger(__name__)
 
 
 @attendance_bp.get("/registrations/<registration_id>/pass")
@@ -19,7 +22,11 @@ def event_pass(registration_id):
         return success(attendance_service.get_event_pass(registration_id, g.current_user["id"]))
     except attendance_service.AttendanceError as exc:
         return error(exc.code, exc.message, exc.status)
-    except DatabaseError:
+    except DatabaseError as exc:
+        logger.error("event_pass_failed stage=database exception=%s", type(exc).__name__)
+        return error("DATABASE_ERROR", "Event pass could not be loaded", 500)
+    except Exception as exc:
+        logger.error("event_pass_failed stage=unexpected exception=%s", type(exc).__name__)
         return error("DATABASE_ERROR", "Event pass could not be loaded", 500)
 
 

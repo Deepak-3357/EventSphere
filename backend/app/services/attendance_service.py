@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import io
 import json
+import logging
 import re
 import secrets
 from datetime import datetime, timedelta
@@ -17,6 +18,9 @@ from cryptography.fernet import Fernet, InvalidToken
 from psycopg.errors import UniqueViolation
 
 from app.db import get_connection
+
+
+logger = logging.getLogger(__name__)
 
 
 class AttendanceError(Exception):
@@ -214,12 +218,17 @@ def _window_is_open(event_date, start_time, end_time, now=None):
 
 
 def get_event_pass(registration_id, student_id):
-    registration_id = _uuid(registration_id, "registration_id")
-    student_id = _uuid(student_id, "student_id")
+    try:
+        registration_id = _uuid(registration_id, "registration_id")
+        student_id = _uuid(student_id, "student_id")
+    except AttendanceError as exc:
+        logger.warning("event_pass_failed stage=validate_ids code=%s", exc.code)
+        raise
     with get_connection() as connection:
         with connection.cursor() as cursor:
-            cursor.execute(
-                """select r.id, r.status, r.student_id, e.id, e.title, e.description,
+            try:
+                cursor.execute(
+                    """select r.id, r.status, r.student_id, e.id, e.title, e.description,
                           e.event_date, e.start_time, e.end_time, e.status,
                           v.name, v.location, p.full_name, p.department, p.year,
                           a.status, a.checked_in_at, r.participation_type, t.id, t.name,
@@ -232,15 +241,26 @@ def get_event_pass(registration_id, student_id):
                    left join teams t on t.id = r.team_id
                    left join attendance a on a.registration_id = r.id
                    where r.id = %s and (r.student_id = %s or exists (select 1 from team_members tm where tm.team_id = r.team_id and tm.student_id = %s))""",
-                (registration_id, student_id, student_id),
-            )
+                        (registration_id, student_id, student_id),
+                )
+            except Exception as exc:
+                logger.error("event_pass_failed stage=registration_lookup exception=%s", type(exc).__name__)
+                raise
             row = cursor.fetchone()
             if not row:
                 raise AttendanceError("PASS_NOT_FOUND", "Event pass not found", 404)
             if row[1] != "registered" or row[9] != "published":
                 raise AttendanceError("PASS_UNAVAILABLE", "Event pass is unavailable for this registration", 409)
-            qr_payload = _signed_payload(registration_id)
-            attendance_code = ensure_attendance_code(cursor, row[0], row[3])
+            try:
+                qr_payload = _signed_payload(registration_id)
+            except Exception as exc:
+                logger.error("event_pass_failed stage=qr_generation exception=%s", type(exc).__name__)
+                raise
+            try:
+                attendance_code = ensure_attendance_code(cursor, row[0], row[3])
+            except Exception as exc:
+                logger.error("event_pass_failed stage=attendance_code exception=%s", type(exc).__name__)
+                raise
             return {
                 "registration_id": str(row[0]),
                 "registration_status": row[1],

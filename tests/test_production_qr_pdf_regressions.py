@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
 from app import create_app  # noqa: E402
-from app.services.attendance_service import _qr_image_data_url, _signed_payload, _verify_payload, _window_is_open  # noqa: E402
+from app.services.attendance_service import _code_fernet, _qr_image_data_url, _signed_payload, _verify_payload, _window_is_open  # noqa: E402
 
 
 class ProductionQrPdfRegressionTestCase(unittest.TestCase):
@@ -66,6 +66,22 @@ class ProductionQrPdfRegressionTestCase(unittest.TestCase):
         self.assertIn("The event pass data is incomplete", self.event_pass_js)
         self.assertIn("does not contain a valid signed QR payload", self.event_pass_js)
         self.assertIn("qrCode.onerror", self.event_pass_js)
+
+    def test_event_pass_failure_stages_are_logged_without_sensitive_values(self):
+        attendance_service = (ROOT / "backend" / "app" / "services" / "attendance_service.py").read_text(encoding="utf-8")
+        attendance_route = (ROOT / "backend" / "app" / "routes" / "attendance.py").read_text(encoding="utf-8")
+        for stage in ("registration_lookup", "qr_generation", "attendance_code", "database"):
+            self.assertIn(f"event_pass_failed stage={stage}", attendance_service + attendance_route)
+        self.assertIn("type(exc).__name__", attendance_service + attendance_route)
+        self.assertNotIn("access_token", attendance_service + attendance_route)
+        self.assertNotIn("attendance_code=%s", attendance_service + attendance_route)
+
+    def test_qr_secret_is_a_safe_fallback_for_code_derivation(self):
+        with self.app.app_context():
+            self.app.config.update(ATTENDANCE_QR_SECRET="qr-only-test-secret", ATTENDANCE_CODE_SECRET="", ATTENDANCE_CODE_ENCRYPTION_KEY="")
+            cipher = _code_fernet()
+            encrypted = cipher.encrypt(b"123456")
+            self.assertEqual(cipher.decrypt(encrypted), b"123456")
 
     def test_event_pass_uses_registration_contract_and_actionable_retry_errors(self):
         self.assertIn("/api/registrations/${encodeURIComponent(registrationId)}/pass", self.event_pass_js)
