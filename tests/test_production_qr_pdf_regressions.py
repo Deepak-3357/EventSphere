@@ -40,15 +40,23 @@ class ProductionQrPdfRegressionTestCase(unittest.TestCase):
         self.assertEqual(verified_registration_id, registration_id)
         self.assertEqual(json.loads(payload)["type"], "eventsphere_attendance")
 
-    def test_attendance_window_uses_configured_campus_timezone(self):
+    def test_attendance_window_uses_configured_campus_timezone_and_boundaries(self):
         from datetime import datetime, timedelta
         from zoneinfo import ZoneInfo
 
         timezone = ZoneInfo("Asia/Kolkata")
-        now = datetime.now(timezone)
+        event_date = datetime(2026, 10, 11, tzinfo=timezone).date()
+        start_time = datetime(2026, 10, 11, 10, 0, tzinfo=timezone).time()
+        end_time = datetime(2026, 10, 11, 11, 0, tzinfo=timezone).time()
+        window_start = datetime(2026, 10, 11, 9, 30, tzinfo=timezone)
+        window_end = datetime(2026, 10, 11, 13, 0, tzinfo=timezone)
         with self.app.app_context():
             self.app.config.update(ATTENDANCE_TIMEZONE="Asia/Kolkata", ATTENDANCE_EARLY_MINUTES=30, ATTENDANCE_LATE_MINUTES=120)
-            self.assertTrue(_window_is_open(now.date(), (now - timedelta(minutes=5)).time(), (now + timedelta(minutes=5)).time()))
+            self.assertFalse(_window_is_open(event_date, start_time, end_time, now=window_start - timedelta(seconds=1)))
+            self.assertTrue(_window_is_open(event_date, start_time, end_time, now=window_start))
+            self.assertTrue(_window_is_open(event_date, start_time, end_time, now=window_start + timedelta(hours=1)))
+            self.assertTrue(_window_is_open(event_date, start_time, end_time, now=window_end))
+            self.assertFalse(_window_is_open(event_date, start_time, end_time, now=window_end + timedelta(seconds=1)))
 
     def test_event_pass_uses_backend_qr_image_and_handles_failures(self):
         self.assertNotIn("qrcode@", self.event_pass_html)
@@ -56,6 +64,17 @@ class ProductionQrPdfRegressionTestCase(unittest.TestCase):
         self.assertIn("The event pass data is incomplete", self.event_pass_js)
         self.assertIn("does not contain a valid signed QR payload", self.event_pass_js)
         self.assertIn("qrCode.onerror", self.event_pass_js)
+
+    def test_qr_payload_contract_is_signed_json_and_submitted_unchanged(self):
+        registration_id = str(uuid.uuid4())
+        with self.app.app_context():
+            payload = _signed_payload(registration_id)
+            document = json.loads(payload)
+        self.assertEqual(set(document), {"registration_id", "token", "type"})
+        self.assertEqual(document["registration_id"], registration_id)
+        self.assertEqual(document["type"], "eventsphere_attendance")
+        self.assertIn('JSON.stringify({ qr_payload: decodedText })', self.attendance_scanner_js)
+        self.assertNotIn('JSON.stringify({ qr_payload: JSON.stringify', self.attendance_scanner_js)
 
     def test_od_download_validates_status_content_type_and_pdf_signature(self):
         self.assertIn("apiUrl(\"/api\")", self.od_letter_js)

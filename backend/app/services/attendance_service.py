@@ -88,12 +88,16 @@ def _verify_payload(raw_payload):
     return registration_id
 
 
-def _window_is_open(event_date, start_time, end_time):
+def _window_is_open(event_date, start_time, end_time, now=None):
     try:
         timezone = ZoneInfo(current_app.config.get("ATTENDANCE_TIMEZONE", "Asia/Kolkata"))
     except ZoneInfoNotFoundError:
         raise AttendanceError("CONFIGURATION_ERROR", "Attendance timezone is invalid", 500)
-    now = datetime.now(timezone)
+    now = now or datetime.now(timezone)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone)
+    else:
+        now = now.astimezone(timezone)
     start = datetime.combine(event_date, start_time, tzinfo=timezone) - timedelta(
         minutes=int(current_app.config.get("ATTENDANCE_EARLY_MINUTES", 30))
     )
