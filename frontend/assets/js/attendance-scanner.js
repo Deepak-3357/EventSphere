@@ -7,6 +7,15 @@ let checkInInProgress = false;
 
 function scannerRole() { return window.location.pathname.includes("/admin/") ? "admin" : "organizer"; }
 function showScannerMessage(message, danger = false) { scannerMessage.className = `small mt-3 ${danger ? "text-danger" : "text-success"}`; scannerMessage.textContent = message; }
+async function fetchWithTimeout(url, options, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
 function renderAttendance(data) {
   const s = data.summary;
   summary.textContent = `Registered: ${s.registered} · Checked in: ${s.checked_in} · Absent: ${s.absent} · Attendance: ${s.attendance_percentage}%`;
@@ -38,7 +47,7 @@ async function loadAttendance(session) {
         checkInInProgress = true;
         showScannerMessage("QR detected. Verifying attendance…");
         try {
-          const response = await fetch(apiUrl("/api/attendance/check-in"), { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ qr_payload: decodedText }) });
+          const response = await fetchWithTimeout(apiUrl("/api/attendance/check-in"), { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ qr_payload: decodedText }) });
           const result = await response.json().catch(() => ({}));
           const attendance = result.data;
           if (!response.ok || result.success !== true || !attendance?.attendance_id || attendance.status !== "present") {
@@ -51,7 +60,10 @@ async function loadAttendance(session) {
             showScannerMessage(`Check-in recorded, but the attendance list could not be refreshed: ${error.message}`, true);
           }
         } catch (error) {
-          showScannerMessage(error.message || "Attendance could not be recorded. Please try again.", true);
+          const message = error.name === "AbortError"
+            ? "Attendance verification timed out. Check the connection and try again."
+            : (error.message || "Attendance could not be recorded. Please try again.");
+          showScannerMessage(message, true);
         } finally {
           checkInInProgress = false;
         }

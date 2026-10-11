@@ -63,6 +63,9 @@ class ProductionQrPdfRegressionTestCase(unittest.TestCase):
         self.assertIn('attendance.status !== "present"', self.attendance_scanner_js)
         self.assertIn("checkInInProgress", self.attendance_scanner_js)
         self.assertIn("Check-in recorded, but the attendance list could not be refreshed", self.attendance_scanner_js)
+        self.assertIn("fetchWithTimeout", self.attendance_scanner_js)
+        self.assertIn('error.name === "AbortError"', self.attendance_scanner_js)
+        self.assertIn("finally", self.attendance_scanner_js)
 
 
 if __name__ == "__main__":
