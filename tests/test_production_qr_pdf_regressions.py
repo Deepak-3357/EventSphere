@@ -24,6 +24,7 @@ class ProductionQrPdfRegressionTestCase(unittest.TestCase):
         cls.app.config.update(TESTING=True, ATTENDANCE_QR_SECRET="regression-secret")
         cls.event_pass_js = (ROOT / "frontend" / "assets" / "js" / "event-pass.js").read_text(encoding="utf-8")
         cls.event_pass_html = (ROOT / "frontend" / "student" / "event-pass" / "index.html").read_text(encoding="utf-8")
+        cls.my_registrations_js = (ROOT / "frontend" / "assets" / "js" / "my-registrations.js").read_text(encoding="utf-8")
         cls.od_letter_js = (ROOT / "frontend" / "assets" / "js" / "od-letter.js").read_text(encoding="utf-8")
         cls.attendance_scanner_js = (ROOT / "frontend" / "assets" / "js" / "attendance-scanner.js").read_text(encoding="utf-8")
         cls.attendance_html = (ROOT / "frontend" / "organizer" / "attendance" / "index.html").read_text(encoding="utf-8")
@@ -65,6 +66,15 @@ class ProductionQrPdfRegressionTestCase(unittest.TestCase):
         self.assertIn("The event pass data is incomplete", self.event_pass_js)
         self.assertIn("does not contain a valid signed QR payload", self.event_pass_js)
         self.assertIn("qrCode.onerror", self.event_pass_js)
+
+    def test_event_pass_uses_registration_contract_and_actionable_retry_errors(self):
+        self.assertIn("/api/registrations/${encodeURIComponent(registrationId)}/pass", self.event_pass_js)
+        self.assertIn("body.success !== true", self.event_pass_js)
+        self.assertIn('status === 401', self.event_pass_js)
+        self.assertIn('status === 404', self.event_pass_js)
+        self.assertIn('status >= 500', self.event_pass_js)
+        self.assertIn('id="retryPass"', self.event_pass_html)
+        self.assertIn('registration_id=${encodeURIComponent(registration.registration_id)}', self.my_registrations_js)
 
     def test_qr_payload_contract_is_signed_json_and_submitted_unchanged(self):
         registration_id = str(uuid.uuid4())
