@@ -1,6 +1,6 @@
 const odMessage = document.querySelector("#odMessage"); const odCard = document.querySelector("#odCard"); const apiRoot = apiUrl("/api");
 function safePdfFilename(letterNumber) { return `${String(letterNumber || "eventsphere-od-letter").replace(/[^a-z0-9._-]+/gi, "_")}.pdf`; }
-(async () => {
+ (async () => {
   try {
     const registrationId = new URLSearchParams(location.search).get("registration_id");
     const client = await getSupabaseClient(); const session = (await client.auth.getSession()).data.session; if (!session) { redirectToLogin("student"); return; }
@@ -11,11 +11,11 @@ function safePdfFilename(letterNumber) { return `${String(letterNumber || "event
     const existing = await fetch(`${apiRoot}/registrations/${encodeURIComponent(registrationId)}/od-letter`, { headers });
     if (existing.ok) {
       const existingBody = await existing.json();
-      setup(existingBody.data);
+      setup(existingBody.data, session);
     }
-    document.querySelector("#generateButton").addEventListener("click", async () => { const response = await fetch(`${apiRoot}/registrations/${encodeURIComponent(registrationId)}/od-letter`, { method: "POST", headers }); const body = await response.json(); if (!response.ok) throw new Error(body.error?.message || "OD letter could not be generated."); setup(body.data); });
+    document.querySelector("#generateButton").addEventListener("click", async () => { const response = await fetch(`${apiRoot}/registrations/${encodeURIComponent(registrationId)}/od-letter`, { method: "POST", headers }); const body = await response.json(); if (!response.ok) throw new Error(body.error?.message || "OD letter could not be generated."); setup(body.data, session); });
   } catch (error) { odMessage.className = "alert alert-danger mt-3"; odMessage.textContent = error.message; }
-  function setup(letter) {
+  function setup(letter, authSession) {
     if (!letter) return;
     odMessage.className = "alert alert-success mt-3";
     odMessage.textContent = `Generated ${letter.letter_number}.`;
@@ -29,7 +29,7 @@ function safePdfFilename(letterNumber) { return `${String(letterNumber || "event
       event.preventDefault();
       link.setAttribute("aria-busy", "true");
       try {
-        const response = await fetch(url, { headers: { Authorization: `Bearer ${session.access_token}` } });
+        const response = await fetch(url, { headers: { Authorization: `Bearer ${authSession.access_token}` } });
         const contentType = (response.headers.get("content-type") || "").toLowerCase();
         if (!response.ok || !contentType.includes("application/pdf")) {
           const body = await response.json().catch(() => ({}));
