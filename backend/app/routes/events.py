@@ -129,10 +129,17 @@ def get_event(event_id):
 
 @events_bp.get("/<event_id>/faqs")
 def get_event_faqs(event_id):
+    identity, auth_error = _optional_identity()
+    if auth_error:
+        return auth_error
     try:
         event_id = event_service.parse_uuid(event_id, "event_id")
         event = event_service.get_event(event_id)
-        if not event or event["status"] != "published":
+        if not event:
+            return error("NOT_FOUND", "Event not found", 404)
+        is_owner = identity and event["organizer"]["id"] == identity["id"]
+        role = identity["profile"]["role"] if identity else None
+        if event["status"] != "published" and role != "admin" and not (role == "organizer" and is_owner):
             return error("NOT_FOUND", "Event not found", 404)
         return success(list(event_service.list_faqs(event_id)))
     except ValueError as exc:

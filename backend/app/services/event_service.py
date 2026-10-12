@@ -335,7 +335,8 @@ def update_event(event_id, payload):
             source["start_time"] = time.fromisoformat(current["start_time"])
             source["end_time"] = time.fromisoformat(current["end_time"])
             source["registration_deadline"] = datetime.fromisoformat(current["registration_deadline"].replace("Z", "+00:00"))
-            values = validate_event_payload(payload, current=source, requested_status=payload.get("status", current["status"]))
+            requested_status = payload.get("status", current["status"]) if isinstance(payload, dict) else None
+            values = validate_event_payload(payload, current=source, requested_status=requested_status)
             if values["status"] != current["status"] and values["status"] not in STATUS_TRANSITIONS[current["status"]]:
                 raise ValueError(f"Cannot transition event from {current['status']} to {values['status']}")
             changed_fields = {

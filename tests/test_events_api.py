@@ -218,6 +218,51 @@ class EventApiTestCase(unittest.TestCase):
                     )
                     self.assertEqual(response.status_code, 403)
 
+    def test_draft_faqs_and_partial_edit_preserve_existing_data(self):
+        payload = {
+            "title": f"FAQ Test {uuid.uuid4()}",
+            "description": "Keep this description",
+            "category_id": "10000000-0000-0000-0000-000000000001",
+            "venue_id": "20000000-0000-0000-0000-000000000004",
+            "event_date": "2099-12-04",
+            "start_time": "10:00",
+            "end_time": "11:00",
+            "capacity": 10,
+            "registration_deadline": "2099-12-03T18:00:00+05:30",
+        }
+        with self._auth(ORGANIZER, "organizer"):
+            with patch("app.routes.events.verify_access_token", return_value=ORGANIZER), patch(
+                "app.routes.events._load_profile", return_value=profile(ORGANIZER, "organizer")
+            ):
+                created = self.client.post("/api/events", json=payload, headers={"Authorization": "Bearer organizer-test-token"})
+                self.assertEqual(created.status_code, 201)
+                event = created.get_json()["data"]
+                self.created_ids.append(event["id"])
+                faq = self.client.post(
+                    f"/api/events/{event['id']}/faqs",
+                    json={"question": "When?", "answer": "At ten.", "position": 0},
+                    headers={"Authorization": "Bearer organizer-test-token"},
+                )
+                self.assertEqual(faq.status_code, 201)
+                listed = self.client.get(f"/api/events/{event['id']}/faqs", headers={"Authorization": "Bearer organizer-test-token"})
+                self.assertEqual(listed.status_code, 200)
+                self.assertEqual(listed.get_json()["data"][0]["question"], "When?")
+                updated = self.client.put(
+                    f"/api/events/{event['id']}",
+                    json={"title": "Edited title"},
+                    headers={"Authorization": "Bearer organizer-test-token"},
+                )
+                self.assertEqual(updated.status_code, 200)
+                self.assertEqual(updated.get_json()["data"]["description"], payload["description"])
+                self.assertEqual(self.client.get(f"/api/events/{event['id']}/faqs", headers={"Authorization": "Bearer organizer-test-token"}).get_json()["data"][0]["answer"], "At ten.")
+
+        with self._auth(OTHER_ORGANIZER, "organizer"):
+            with patch("app.routes.events.verify_access_token", return_value=OTHER_ORGANIZER), patch(
+                "app.routes.events._load_profile", return_value=profile(OTHER_ORGANIZER, "organizer")
+            ):
+                self.assertEqual(self.client.get(f"/api/events/{event['id']}/faqs", headers={"Authorization": "Bearer other-organizer-test-token"}).status_code, 404)
+                self.assertEqual(self.client.post(f"/api/events/{event['id']}/faqs", json={"question": "No", "answer": "No"}, headers={"Authorization": "Bearer other-organizer-test-token"}).status_code, 403)
+
     def test_unauthenticated_management_requests_are_rejected(self):
         event_id = "30000000-0000-0000-0000-000000000001"
         self.assertEqual(self.client.post("/api/events", json={}).status_code, 401)
