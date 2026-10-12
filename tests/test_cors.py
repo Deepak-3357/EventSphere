@@ -56,7 +56,7 @@ class CorsAllowlistTestCase(unittest.TestCase):
             "/api/health",
             headers={
                 "Origin": "https://preview.example.com",
-                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Method": "PUT",
                 "Access-Control-Request-Headers": "Authorization, Content-Type",
             },
         )
@@ -64,7 +64,7 @@ class CorsAllowlistTestCase(unittest.TestCase):
         self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), "https://preview.example.com")
         self.assertIn("Authorization", response.headers.get("Access-Control-Allow-Headers", ""))
         self.assertIn("Content-Type", response.headers.get("Access-Control-Allow-Headers", ""))
-        self.assertIn("POST", response.headers.get("Access-Control-Allow-Methods", ""))
+        self.assertIn("PUT", response.headers.get("Access-Control-Allow-Methods", ""))
         self.assertEqual(response.headers.get("Vary"), "Origin")
 
     def test_disallowed_preflight_is_not_granted_access(self):
