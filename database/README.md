@@ -40,3 +40,17 @@ py backend\scripts\apply_migrations.py
 ```
 
 The script reads `.env`, connects with psycopg using separate connection parameters (so special characters in the password are handled safely), and executes the migration followed by the seed file. Required variables are documented in `.env.example`.
+
+## Deployment order
+
+Render deploys `backend/` and Supabase holds the schema, so the two move independently. **Apply migrations before deploying backend code that depends on them.** A backend that selects a column the database does not have yet fails every request that touches that column, and the API reports it to users as a generic `The event request could not be completed.` — this is what took out both event lists when `20261012100000_manual_event_lifecycle.sql` was committed but not applied.
+
+`GET /api/health/schema` reports whether the connected database matches the deployed code. It returns `503` and names the missing tables/columns while a migration is still pending, so a half-applied deployment is visible at deploy time instead of silent. `tests/test_schema_contract.py` enforces the same contract offline.
+
+The migration set as a whole is **not** re-runnable against an existing database: several files add constraints and triggers without a preceding `drop`, so re-running everything fails partway. Apply only the pending file — every statement in it is guarded — for example by pasting `supabase/migrations/20261012100000_manual_event_lifecycle.sql` into the Supabase SQL editor, or:
+
+```powershell
+psql -h <host> -U postgres -d postgres -f supabase\migrations\20261012100000_manual_event_lifecycle.sql
+```
+
+`py backend\scripts\apply_migrations.py` runs the whole set plus the seed and is intended for a fresh local database, not for production catch-up.

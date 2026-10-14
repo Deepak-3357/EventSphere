@@ -85,6 +85,8 @@ Open `http://127.0.0.1:5500`. The “Check API status” button uses Fetch API t
 
 The expected Supabase project reference is documented in `database/README.md`. Phase 2 adds a reproducible migration under `supabase/migrations/`, seed data under `database/seed.sql`, and a psycopg connection layer. Run `py backend\scripts\apply_migrations.py` after configuring the local `.env` file.
 
+Apply pending migrations **before** deploying backend code that depends on them: Render ships the Flask code while Supabase holds the schema, and a backend that selects a column the database does not have yet turns every affected route into a generic 500. `GET /api/health/schema` reports `503` with the missing objects while a migration is pending. See `database/README.md` for the production catch-up procedure.
+
 The final schema includes `profiles`, `categories`, `venues`, `events`, `registrations`, `notifications`, `attendance`, and `od_letters`. RLS policies restrict direct authenticated reads by ownership; Flask remains the validated write path.
 
 ## Authentication
