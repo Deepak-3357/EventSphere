@@ -283,6 +283,74 @@ def cancel_event(event_id):
     return _change_event_status(event_id, "cancelled")
 
 
+@events_bp.patch("/<event_id>/unpublish")
+@require_auth
+@require_role("organizer", "admin")
+def unpublish_event(event_id):
+    """Explicit unpublish: the only server path back from Published to Draft."""
+
+    try:
+        event_id = event_service.parse_uuid(event_id, "event_id")
+        existing = event_service.get_event(event_id)
+        if not existing:
+            return error("NOT_FOUND", "Event not found", 404)
+        if not _owned_or_admin(existing):
+            return error("FORBIDDEN", "You may only unpublish your own events", 403)
+        if existing["status"] != "published":
+            return error("INVALID_STATE", "Only published events can be unpublished", 409)
+        event = event_service.unpublish_event(event_id, g.current_user["id"])
+        return success(event)
+    except ValueError as exc:
+        return error("VALIDATION_ERROR", str(exc), 422)
+    except DatabaseError:
+        return _handle_database_error()
+
+
+@events_bp.post("/<event_id>/start")
+@require_auth
+@require_role("organizer", "admin")
+def start_event(event_id):
+    try:
+        event_id = event_service.parse_uuid(event_id, "event_id")
+        existing = event_service.get_event(event_id)
+        if not existing:
+            return error("NOT_FOUND", "Event not found", 404)
+        if not _owned_or_admin(existing):
+            return error("FORBIDDEN", "You may only start your own events", 403)
+        if existing["status"] != "published":
+            return error("INVALID_STATE", "Only published events can be manually started", 409)
+        result = event_service.start_event(event_id, g.current_user["id"])
+        return success(result)
+    except ValueError as exc:
+        return error("VALIDATION_ERROR", str(exc), 422)
+    except DatabaseError:
+        return _handle_database_error()
+
+
+@events_bp.post("/<event_id>/end")
+@require_auth
+@require_role("organizer", "admin")
+def end_event(event_id):
+    body = request.get_json(silent=True) or {}
+    if body.get("confirm") is not True:
+        return error("CONFIRMATION_REQUIRED", "Set \"confirm\": true to end this event", 400)
+    try:
+        event_id = event_service.parse_uuid(event_id, "event_id")
+        existing = event_service.get_event(event_id)
+        if not existing:
+            return error("NOT_FOUND", "Event not found", 404)
+        if not _owned_or_admin(existing):
+            return error("FORBIDDEN", "You may only end your own events", 403)
+        if existing["status"] != "published":
+            return error("INVALID_STATE", "Only published events can be manually ended", 409)
+        result = event_service.end_event(event_id, g.current_user["id"])
+        return success(result)
+    except ValueError as exc:
+        return error("VALIDATION_ERROR", str(exc), 422)
+    except DatabaseError:
+        return _handle_database_error()
+
+
 def _change_event_status(event_id, new_status):
     try:
         event_id = event_service.parse_uuid(event_id, "event_id")

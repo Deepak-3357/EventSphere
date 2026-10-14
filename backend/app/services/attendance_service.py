@@ -198,7 +198,7 @@ def _verify_payload(raw_payload):
     return registration_id
 
 
-def _window_is_open(event_date, start_time, end_time, now=None):
+def _window_is_open(event_date, start_time, end_time, now=None, started_at=None, ended_at=None):
     try:
         timezone = ZoneInfo(current_app.config.get("ATTENDANCE_TIMEZONE", "Asia/Kolkata"))
     except ZoneInfoNotFoundError:
@@ -208,10 +208,22 @@ def _window_is_open(event_date, start_time, end_time, now=None):
         now = now.replace(tzinfo=timezone)
     else:
         now = now.astimezone(timezone)
-    start = datetime.combine(event_date, start_time, tzinfo=timezone) - timedelta(
+    # A manual end always closes attendance immediately, regardless of the
+    # scheduled end time or any manual start override (must never "reopen").
+    if ended_at is not None:
+        return False
+    # While an event is manually Running (started, not yet ended), attendance
+    # is open from the recorded start instant, even if the scheduled start has
+    # not arrived or the scheduled end has passed.
+    if started_at is not None:
+        manual_start = started_at.replace(tzinfo=timezone) if started_at.tzinfo is None else started_at.astimezone(timezone)
+        return manual_start <= now
+    scheduled_start = datetime.combine(event_date, start_time, tzinfo=timezone)
+    scheduled_end = datetime.combine(event_date, end_time, tzinfo=timezone)
+    start = scheduled_start - timedelta(
         minutes=int(current_app.config.get("ATTENDANCE_EARLY_MINUTES", 30))
     )
-    end = datetime.combine(event_date, end_time, tzinfo=timezone) + timedelta(
+    end = scheduled_end + timedelta(
         minutes=int(current_app.config.get("ATTENDANCE_LATE_MINUTES", 120))
     )
     return start <= now <= end
@@ -289,7 +301,8 @@ def get_event_pass(registration_id, student_id):
 def _record_attendance(cursor, registration_id, scanner_id, scanner_role, expected_event_id=None):
     cursor.execute(
         """select r.id, r.status, r.student_id, e.id, e.organizer_id,
-                  e.title, e.event_date, e.start_time, e.end_time, e.status, p.full_name
+                  e.title, e.event_date, e.start_time, e.end_time, e.status, p.full_name,
+                  e.started_at, e.ended_at
            from registrations r join events e on e.id = r.event_id
            join profiles p on p.id = r.student_id
            where r.id = %s for update""",
@@ -306,7 +319,9 @@ def _record_attendance(cursor, registration_id, scanner_id, scanner_role, expect
         raise AttendanceError("EVENT_UNAVAILABLE", "Event is not available for attendance", 409)
     if scanner_role == "organizer" and str(row[4]) != str(scanner_id):
         raise AttendanceError("FORBIDDEN", "You do not own this event", 403)
-    if not _window_is_open(row[6], row[7], row[8]):
+    if row[12] is not None:
+        raise AttendanceError("EVENT_ENDED", "Attendance is closed because the event has been manually ended", 409)
+    if not _window_is_open(row[6], row[7], row[8], started_at=row[11], ended_at=row[12]):
         raise AttendanceError("ATTENDANCE_CLOSED", "Attendance is outside the event check-in window", 409)
     cursor.execute("select id from attendance where registration_id = %s for update", (registration_id,))
     if cursor.fetchone():

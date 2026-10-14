@@ -1,6 +1,6 @@
 """Database operations for EventSphere event management."""
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timezone
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -14,7 +14,7 @@ CREATE_STATUSES = {"draft", "pending"}
 STATUS_TRANSITIONS = {
     "draft": {"pending", "published", "cancelled"},
     "pending": {"draft", "published", "cancelled"},
-    "published": {"completed", "cancelled"},
+    "published": {"completed", "cancelled", "draft"},
     "cancelled": set(),
     "completed": set(),
 }
@@ -167,6 +167,7 @@ EVENT_SELECT = """
     e.registration_deadline, e.status, e.image_url, e.participation_mode,
     e.min_team_size, e.max_team_size, e.eligibility, e.registration_instructions,
     e.facilities, e.created_at, e.updated_at,
+    e.started_at, e.ended_at,
     (select count(*) from registrations r where r.event_id = e.id and r.status = 'registered')::int as registered_count,
     (e.capacity - (select count(*) from registrations r where r.event_id = e.id and r.status = 'registered'))::int as available_seats,
     c.name as category_name,
@@ -193,6 +194,11 @@ def serialize_event(row, columns):
         "capacity": event.pop("venue_capacity"),
     }
     event["organizer"] = {"id": event.pop("organizer_id"), "name": event.pop("organizer_name")}
+    started_at, ended_at = event.pop("started_at", None), event.pop("ended_at", None)
+    if event["status"] == "published":
+        event["operational_state"] = (
+            "ended" if ended_at else "running" if started_at else "scheduled"
+        )
     return event
 
 
@@ -335,7 +341,9 @@ def update_event(event_id, payload):
             source["start_time"] = time.fromisoformat(current["start_time"])
             source["end_time"] = time.fromisoformat(current["end_time"])
             source["registration_deadline"] = datetime.fromisoformat(current["registration_deadline"].replace("Z", "+00:00"))
-            requested_status = payload.get("status", current["status"]) if isinstance(payload, dict) else None
+            # Server-authoritative publication state: ordinary edits never change the
+            # publication status. Only POST /publish and POST /cancel may transition.
+            requested_status = current["status"]
             values = validate_event_payload(payload, current=source, requested_status=requested_status)
             if values["status"] != current["status"] and values["status"] not in STATUS_TRANSITIONS[current["status"]]:
                 raise ValueError(f"Cannot transition event from {current['status']} to {values['status']}")
@@ -375,6 +383,124 @@ def update_event(event_id, payload):
                     "cancellation",
                 )
             return _fetch_event(cursor, event_id)
+
+
+def start_event(event_id, actor_id):
+    """Manually mark a published event as started. Idempotent and owner-safe."""
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """select id, status, started_at, started_by from events where id = %s for update""",
+                (event_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            _, event_status, started_at, started_by = row
+            if event_status != "published":
+                raise ValueError("Only published events can be manually started")
+            if started_at is not None:
+                return {
+                    "id": str(event_id),
+                    "status": event_status,
+                    "operational_state": "running",
+                    "started_at": started_at.isoformat(),
+                    "started_by": str(started_by) if started_by else None,
+                    "already_started": True,
+                }
+            started_at = datetime.now(timezone.utc)
+            cursor.execute(
+                """update events set started_at = %s, started_by = %s, updated_at = now()
+                   where id = %s""",
+                (started_at, actor_id, event_id),
+            )
+            _record_lifecycle_audit(cursor, event_id, "manual_start", actor_id)
+            return {
+                "id": str(event_id),
+                "status": event_status,
+                "operational_state": "running",
+                "started_at": started_at.isoformat(),
+                "started_by": str(actor_id),
+                "already_started": False,
+            }
+
+
+def end_event(event_id, actor_id):
+    """Manually end a running event; closes attendance and persists the state."""
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """select id, status, started_at, started_by, ended_at, ended_by
+                   from events where id = %s for update""",
+                (event_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            _, event_status, ended_at, ended_by = row[0], row[1], row[4], row[5]
+            if event_status != "published":
+                raise ValueError("Only published events can be manually ended")
+            if ended_at is not None:
+                return {
+                    "id": str(event_id),
+                    "status": event_status,
+                    "operational_state": "ended",
+                    "ended_at": ended_at.isoformat(),
+                    "ended_by": str(ended_by) if ended_by else None,
+                    "attendance_closed": True,
+                    "already_ended": True,
+                }
+            ended_at = datetime.now(timezone.utc)
+            cursor.execute(
+                """update events set ended_at = %s, ended_by = %s, updated_at = now()
+                   where id = %s""",
+                (ended_at, actor_id, event_id),
+            )
+            _record_lifecycle_audit(cursor, event_id, "manual_end", actor_id)
+            return {
+                "id": str(event_id),
+                "status": event_status,
+                "operational_state": "ended",
+                "ended_at": ended_at.isoformat(),
+                "ended_by": str(actor_id),
+                "attendance_closed": True,
+                "already_ended": False,
+            }
+
+
+def _record_lifecycle_audit(cursor, event_id, action, actor_id):
+    cursor.execute(
+        """insert into event_lifecycle_audit(event_id, action, actor_id)
+           values (%s, %s, %s)""",
+        (event_id, action, actor_id),
+    )
+
+
+def unpublish_event(event_id, actor_id):
+    """Explicit unpublish of a Published event back to Draft, with audit row."""
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """select id, status from events where id = %s for update""",
+                (event_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            _, event_status = row
+            if event_status != "published":
+                raise ValueError("Only published events can be unpublished")
+            cursor.execute(
+                "update events set status = 'draft', updated_at = now() where id = %s",
+                (event_id,),
+            )
+            _record_lifecycle_audit(cursor, event_id, "manual_unpublish", actor_id)
+            event = _fetch_event(cursor, event_id)
+            event["was_published"] = True
+            return event
 
 
 def change_status(event_id, new_status):
