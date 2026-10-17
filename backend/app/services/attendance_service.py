@@ -18,6 +18,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from psycopg.errors import UniqueViolation
 
 from app.db import get_connection
+from app.services.event_service import lifecycle_timestamp_sql
 
 
 logger = logging.getLogger(__name__)
@@ -300,9 +301,9 @@ def get_event_pass(registration_id, student_id):
 
 def _record_attendance(cursor, registration_id, scanner_id, scanner_role, expected_event_id=None):
     cursor.execute(
-        """select r.id, r.status, r.student_id, e.id, e.organizer_id,
+        f"""select r.id, r.status, r.student_id, e.id, e.organizer_id,
                   e.title, e.event_date, e.start_time, e.end_time, e.status, p.full_name,
-                  e.started_at, e.ended_at
+                  {lifecycle_timestamp_sql("e")}
            from registrations r join events e on e.id = r.event_id
            join profiles p on p.id = r.student_id
            where r.id = %s for update""",

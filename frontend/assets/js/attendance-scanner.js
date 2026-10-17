@@ -50,9 +50,12 @@ function renderAttendance(data) {
     row.append(name, status); attendeeList.append(row);
   });
 }
+let getAuthToken = () => "";
 async function loadAttendance(session) {
   if (!eventSelect.value) return;
-  const response = await fetch(apiUrl(`/api/events/${eventSelect.value}/attendance`), { headers: { Authorization: `Bearer ${session.access_token}` } });
+  const token = (await getAuthToken()) || session?.access_token;
+  const response = await fetch(apiUrl(`/api/events/${eventSelect.value}/attendance`), { headers: { Authorization: `Bearer ${token}` } });
+  if (response.status === 401) { redirectToLogin(scannerRole()); return; }
   const body = await response.json(); if (!response.ok) throw new Error(body.error?.message || "Attendance could not be loaded."); renderAttendance(body.data);
 }
 async function clearScanner() {
@@ -66,7 +69,15 @@ async function clearScanner() {
   try {
     const client = await getSupabaseClient(); const session = (await client.auth.getSession()).data.session;
     if (!session) { redirectToLogin(scannerRole()); return; }
+    getAuthToken = async () => {
+      try {
+        const { data } = await client.auth.getSession();
+        if (data?.session?.access_token) return data.session.access_token;
+      } catch (_) {}
+      return session?.access_token || "";
+    };
     const events = await fetch(apiUrl("/api/events?limit=100"), { headers: { Authorization: `Bearer ${session.access_token}` } });
+    if (events.status === 401) { redirectToLogin(scannerRole()); return; }
     const body = await events.json(); if (!events.ok) throw new Error(body.error?.message || "Events could not be loaded.");
     body.data.forEach((event) => { const option = document.createElement("option"); option.value = event.id; option.textContent = `${event.title} — ${event.event_date}`; eventSelect.append(option); });
     eventSelect.addEventListener("change", () => loadAttendance(session).catch((error) => showScannerMessage(error.message, true)));
@@ -96,7 +107,9 @@ async function clearScanner() {
         showScannerMessage("QR detected. Verifying attendance…");
         try {
           const checkInUrl = eventSelect.value ? apiUrl(`/api/attendance/check-in?event_id=${encodeURIComponent(eventSelect.value)}`) : apiUrl("/api/attendance/check-in");
-          const response = await fetchWithTimeout(checkInUrl, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ qr_payload: qrPayload }) });
+          const token = (await getAuthToken()) || session.access_token;
+          const response = await fetchWithTimeout(checkInUrl, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ qr_payload: qrPayload }) });
+          if (response.status === 401) { redirectToLogin(scannerRole()); return; }
           const result = await response.json().catch(() => ({}));
           const attendance = result.data;
           if (!response.ok || result.success !== true || !attendance?.attendance_id || attendance.status !== "present") {
@@ -139,7 +152,9 @@ async function clearScanner() {
       checkInInProgress = true;
       showScannerMessage("Attendance code detected. Verifying attendance…");
       try {
-        const response = await fetchWithTimeout(apiUrl("/api/attendance/manual-check-in"), { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ event_id: eventSelect.value, code }) });
+        const token = (await getAuthToken()) || session.access_token;
+        const response = await fetchWithTimeout(apiUrl("/api/attendance/manual-check-in"), { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ event_id: eventSelect.value, code }) });
+        if (response.status === 401) { redirectToLogin(scannerRole()); return; }
         const result = await response.json().catch(() => ({}));
         const attendance = result.data;
         if (!response.ok || result.success !== true || !attendance?.attendance_id || attendance.status !== "present") throw new Error(result.error?.message || `Attendance could not be recorded (HTTP ${response.status}).`);

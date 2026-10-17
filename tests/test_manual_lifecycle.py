@@ -959,6 +959,57 @@ class AttendanceQrCheckInApiTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()["error"]["code"], "INVALID_QR")
 
+    def test_attendance_query_uses_lifecycle_fallback_when_columns_missing(self):
+        registration_id = str(uuid.uuid4())
+        attendance_id = str(uuid.uuid4())
+        with self.app.app_context():
+            payload = attendance_service._signed_payload(registration_id)
+
+        now = datetime.now()
+        row = (
+            uuid.UUID(registration_id),
+            "registered",
+            uuid.UUID(STUDENT["id"]),
+            uuid.UUID(LIFECYCLE_EVENT_ID),
+            uuid.UUID(ORGANIZER["id"]),
+            "Event Title",
+            now.date(),
+            (now - timedelta(minutes=10)).time(),
+            (now + timedelta(hours=1)).time(),
+            "published",
+            "Student Name",
+            None,
+            None,
+        )
+
+        class FallbackCursor(RecordingCursor):
+            def __init__(self):
+                super().__init__(row)
+                self.step = 0
+
+            def fetchone(self):
+                self.step += 1
+                if self.step == 1:
+                    return row
+                elif self.step == 2:
+                    return None
+                elif self.step == 3:
+                    return (uuid.UUID(attendance_id), datetime.now(timezone.utc), "present")
+                return None
+
+        cursor = FallbackCursor()
+        with patch.object(event_service, "include_lifecycle_columns", return_value=False):
+            with self._auth(), patch("app.services.attendance_service.get_connection", return_value=SingleCursorConnection(cursor)):
+                response = self.client.post(
+                    "/api/attendance/check-in",
+                    query_string={"event_id": LIFECYCLE_EVENT_ID},
+                    json={"qr_payload": payload},
+                    headers={"Authorization": "Bearer test-token"},
+                )
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(any("null::timestamptz as started_at" in s for s in cursor.statements))
+
+
 
 class EventListingScopeTestCase(unittest.TestCase):
     def setUp(self):
