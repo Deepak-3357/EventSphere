@@ -1,12 +1,22 @@
 """Database operations for EventSphere event management."""
 
+import logging
 from datetime import date, datetime, time, timezone
 from urllib.parse import urlparse
 from uuid import UUID
 
 from app.db import get_connection
 from app.services import notification_service
+from psycopg.errors import UndefinedColumn
 from psycopg.types.json import Jsonb
+
+logger = logging.getLogger(__name__)
+
+# Cached once per process. None means "not probed yet". When the lifecycle
+# migration is unapplied, catalog queries use NULL stand-ins instead of the
+# missing columns so listings keep working. Start/end/unpublish still need
+# the real columns.
+_lifecycle_columns_present = None
 
 
 EVENT_STATUSES = {"draft", "pending", "published", "cancelled", "completed"}
@@ -161,19 +171,74 @@ def validate_event_payload(payload, current=None, requested_status=None):
     }
 
 
-EVENT_SELECT = """
+def reset_lifecycle_column_cache():
+    """Forget the cached lifecycle-column probe (tests and after migration)."""
+
+    global _lifecycle_columns_present
+    _lifecycle_columns_present = None
+
+
+def mark_lifecycle_columns_unavailable():
+    global _lifecycle_columns_present
+    _lifecycle_columns_present = False
+
+
+def include_lifecycle_columns():
+    """Whether ``events.started_at`` / ``ended_at`` exist on the connected database."""
+
+    global _lifecycle_columns_present
+    if _lifecycle_columns_present is not None:
+        return _lifecycle_columns_present
+    from app import schema_contract
+
+    report = schema_contract.schema_status()
+    if not report["available"]:
+        return True
+    missing = set(report["missing"].get("columns") or [])
+    _lifecycle_columns_present = "events.started_at" not in missing and "events.ended_at" not in missing
+    if not _lifecycle_columns_present:
+        logger.warning(
+            "event_catalog_compat missing_lifecycle_columns=%s",
+            sorted(column for column in missing if column.startswith("events.")),
+        )
+    return _lifecycle_columns_present
+
+
+def lifecycle_timestamp_sql(alias="e"):
+    """SELECT fragment for start/end timestamps, or NULL stand-ins when absent."""
+
+    if include_lifecycle_columns():
+        return f"{alias}.started_at, {alias}.ended_at"
+    return "null::timestamptz as started_at, null::timestamptz as ended_at"
+
+
+def event_select_sql():
+    return f"""
     e.id, e.title, e.description, e.category_id, e.organizer_id, e.venue_id,
     e.event_date, e.start_time, e.end_time, e.capacity,
     e.registration_deadline, e.status, e.image_url, e.participation_mode,
     e.min_team_size, e.max_team_size, e.eligibility, e.registration_instructions,
     e.facilities, e.created_at, e.updated_at,
-    e.started_at, e.ended_at,
+    {lifecycle_timestamp_sql()},
     (select count(*) from registrations r where r.event_id = e.id and r.status = 'registered')::int as registered_count,
     (e.capacity - (select count(*) from registrations r where r.event_id = e.id and r.status = 'registered'))::int as available_seats,
     c.name as category_name,
     v.name as venue_name, v.location as venue_location, v.capacity as venue_capacity,
     p.full_name as organizer_name
 """
+
+
+def _with_lifecycle_fallback(operation):
+    """Retry a catalog query once if PostgreSQL reports the lifecycle columns missing."""
+
+    try:
+        return operation()
+    except UndefinedColumn:
+        if _lifecycle_columns_present is False:
+            raise
+        mark_lifecycle_columns_unavailable()
+        logger.warning("event_query_retried_without_lifecycle_columns")
+        return operation()
 
 
 def _serialize(value):
@@ -204,7 +269,7 @@ def serialize_event(row, columns):
 
 def _fetch_event(cursor, event_id):
     cursor.execute(
-        f"""select {EVENT_SELECT}
+        f"""select {event_select_sql()}
             from events e
             join categories c on c.id = e.category_id
             join venues v on v.id = e.venue_id
@@ -229,7 +294,7 @@ def list_events(filters, role=None, user_id=None):
             conditions.append("e.status = %s")
             params.append(filters["status"])
     elif role == "organizer":
-        conditions.append("(e.status = 'published' or e.organizer_id = %s)")
+        conditions.append("e.organizer_id = %s")
         params.append(user_id)
         if filters.get("status"):
             conditions.append("e.status = %s")
@@ -252,33 +317,40 @@ def list_events(filters, role=None, user_id=None):
         params.append(filters["date"])
 
     where = " where " + " and ".join(conditions) if conditions else ""
-    with get_connection() as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                f"""select count(*) from events e
-                    join categories c on c.id = e.category_id
-                    join venues v on v.id = e.venue_id{where}""",
-                params,
-            )
-            total = cursor.fetchone()[0]
-            cursor.execute(
-                f"""select {EVENT_SELECT}
-                    from events e
-                    join categories c on c.id = e.category_id
-                    join venues v on v.id = e.venue_id
-                    join profiles p on p.id = e.organizer_id{where}
-                    order by e.event_date asc, e.start_time asc
-                    limit %s offset %s""",
-                params + [limit, (page - 1) * limit],
-            )
-            columns = [description.name for description in cursor.description]
-            return [serialize_event(row, columns) for row in cursor.fetchall()], total
+
+    def _query():
+        with get_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f"""select count(*) from events e
+                        join categories c on c.id = e.category_id
+                        join venues v on v.id = e.venue_id{where}""",
+                    params,
+                )
+                total = cursor.fetchone()[0]
+                cursor.execute(
+                    f"""select {event_select_sql()}
+                        from events e
+                        join categories c on c.id = e.category_id
+                        join venues v on v.id = e.venue_id
+                        join profiles p on p.id = e.organizer_id{where}
+                        order by e.event_date asc, e.start_time asc
+                        limit %s offset %s""",
+                    params + [limit, (page - 1) * limit],
+                )
+                columns = [description.name for description in cursor.description]
+                return [serialize_event(row, columns) for row in cursor.fetchall()], total
+
+    return _with_lifecycle_fallback(_query)
 
 
 def get_event(event_id):
-    with get_connection() as connection:
-        with connection.cursor() as cursor:
-            return _fetch_event(cursor, event_id)
+    def _query():
+        with get_connection() as connection:
+            with connection.cursor() as cursor:
+                return _fetch_event(cursor, event_id)
+
+    return _with_lifecycle_fallback(_query)
 
 
 def is_student_registered(event_id, student_id):
@@ -391,15 +463,17 @@ def start_event(event_id, actor_id):
     with get_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute(
-                """select id, status, started_at, started_by from events where id = %s for update""",
+                """select id, status, started_at, started_by, ended_at from events where id = %s for update""",
                 (event_id,),
             )
             row = cursor.fetchone()
             if not row:
                 return None
-            _, event_status, started_at, started_by = row
+            _, event_status, started_at, started_by, ended_at = row
             if event_status != "published":
                 raise ValueError("Only published events can be manually started")
+            if ended_at is not None:
+                raise ValueError("Cannot start an event that has already ended")
             if started_at is not None:
                 return {
                     "id": str(event_id),
@@ -439,9 +513,14 @@ def end_event(event_id, actor_id):
             row = cursor.fetchone()
             if not row:
                 return None
-            _, event_status, ended_at, ended_by = row[0], row[1], row[4], row[5]
+            event_status, started_at, ended_at, ended_by = row[1], row[2], row[4], row[5]
             if event_status != "published":
                 raise ValueError("Only published events can be manually ended")
+            # events_lifecycle_order_check rejects ended_at without started_at, so an
+            # event that was never manually started must be refused here. Letting the
+            # UPDATE run would surface the CHECK violation as a database error.
+            if started_at is None:
+                raise ValueError("Only started events can be manually ended")
             if ended_at is not None:
                 return {
                     "id": str(event_id),

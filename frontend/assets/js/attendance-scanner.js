@@ -4,6 +4,8 @@ const summary = document.querySelector("#attendanceSummary");
 const attendeeList = document.querySelector("#attendeeList");
 let qrScanner;
 let checkInInProgress = false;
+let lastScannedPayload = null;
+let lastScannedAt = 0;
 
 function scannerRole() { return window.location.pathname.includes("/admin/") ? "admin" : "organizer"; }
 function showScannerMessage(message, danger = false) {
@@ -70,15 +72,31 @@ async function clearScanner() {
     eventSelect.addEventListener("change", () => loadAttendance(session).catch((error) => showScannerMessage(error.message, true)));
     document.querySelector("#startScanner").addEventListener("click", async () => {
       if (qrScanner) return;
+      if (!eventSelect.value) {
+        showScannerMessage("Select an event before starting the scanner.", true);
+        return;
+      }
       const activeScanner = new Html5Qrcode("reader"); qrScanner = activeScanner;
       showScannerMessage("Camera active. Point it at a student event pass.");
       try { await activeScanner.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, async (decodedText) => {
         if (checkInInProgress) return;
+        let qrPayload;
+        try {
+          qrPayload = normalizeDecodedPayload(decodedText);
+        } catch (err) {
+          showScannerMessage(err.message, true);
+          return;
+        }
+        if (qrPayload === lastScannedPayload && Date.now() - lastScannedAt < 4000) {
+          return;
+        }
+        lastScannedPayload = qrPayload;
+        lastScannedAt = Date.now();
         checkInInProgress = true;
         showScannerMessage("QR detected. Verifying attendance…");
         try {
-          const qrPayload = normalizeDecodedPayload(decodedText);
-          const response = await fetchWithTimeout(apiUrl("/api/attendance/check-in"), { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ qr_payload: qrPayload }) });
+          const checkInUrl = eventSelect.value ? apiUrl(`/api/attendance/check-in?event_id=${encodeURIComponent(eventSelect.value)}`) : apiUrl("/api/attendance/check-in");
+          const response = await fetchWithTimeout(checkInUrl, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ qr_payload: qrPayload }) });
           const result = await response.json().catch(() => ({}));
           const attendance = result.data;
           if (!response.ok || result.success !== true || !attendance?.attendance_id || attendance.status !== "present") {
@@ -100,7 +118,15 @@ async function clearScanner() {
         }
       }); } catch (error) {
         await clearScanner();
-        showScannerMessage(error.message || "The camera could not be started. Check camera permissions and try again.", true);
+        let errorMsg = error?.message || "";
+        if (error?.name === "NotAllowedError" || errorMsg.toLowerCase().includes("permission")) {
+          errorMsg = "Camera access denied. Please grant camera permission in your browser.";
+        } else if (error?.name === "NotFoundError" || errorMsg.toLowerCase().includes("not found")) {
+          errorMsg = "No camera found on this device.";
+        } else if (!errorMsg) {
+          errorMsg = "The camera could not be started. Check camera permissions and try again.";
+        }
+        showScannerMessage(errorMsg, true);
       }
     });
     document.querySelector("#stopScanner").addEventListener("click", async () => { await clearScanner(); showScannerMessage("Scanner stopped."); });

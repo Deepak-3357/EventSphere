@@ -47,10 +47,8 @@ Render deploys `backend/` and Supabase holds the schema, so the two move indepen
 
 `GET /api/health/schema` reports whether the connected database matches the deployed code. It returns `503` and names the missing tables/columns while a migration is still pending, so a half-applied deployment is visible at deploy time instead of silent. `tests/test_schema_contract.py` enforces the same contract offline.
 
-The migration set as a whole is **not** re-runnable against an existing database: several files add constraints and triggers without a preceding `drop`, so re-running everything fails partway. Apply only the pending file — every statement in it is guarded — for example by pasting `supabase/migrations/20261012100000_manual_event_lifecycle.sql` into the Supabase SQL editor, or:
+Every migration in this set is written to be re-runnable: constraints are added behind `pg_constraint` existence checks or `drop constraint if exists`, triggers behind `drop trigger if exists`, and tables, indexes and policies behind `if not exists` or drop-then-create. The seed is conflict-aware. Apply only the pending file anyway, so a production change stays attributable to one reviewed artifact — `apply_migrations.py` runs the whole set plus the seed. For example, paste `supabase/migrations/20261012100000_manual_event_lifecycle.sql` into the Supabase SQL editor, or:
 
 ```powershell
 psql -h <host> -U postgres -d postgres -f supabase\migrations\20261012100000_manual_event_lifecycle.sql
 ```
-
-`py backend\scripts\apply_migrations.py` runs the whole set plus the seed and is intended for a fresh local database, not for production catch-up.

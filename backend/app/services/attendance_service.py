@@ -312,7 +312,7 @@ def _record_attendance(cursor, registration_id, scanner_id, scanner_role, expect
     if not row:
         raise AttendanceError("REGISTRATION_NOT_FOUND", "Registration not found", 404)
     if expected_event_id and str(row[3]) != str(expected_event_id):
-        raise AttendanceError("INVALID_ATTENDANCE_CODE", "The attendance code is invalid", 400)
+        raise AttendanceError("WRONG_EVENT", "This pass is for a different event", 400)
     if row[1] != "registered":
         raise AttendanceError("REGISTRATION_INACTIVE", "Registration is not active", 409)
     if row[9] != "published":
@@ -341,12 +341,14 @@ def _record_attendance(cursor, registration_id, scanner_id, scanner_role, expect
             "event_title": row[5], "student_name": row[10]}
 
 
-def check_in(raw_payload, scanner_id, scanner_role):
+def check_in(raw_payload, scanner_id, scanner_role, event_id=None):
     registration_id = _verify_payload(raw_payload)
     scanner_id = _uuid(scanner_id, "scanner_id")
+    if event_id:
+        event_id = _uuid(event_id, "event_id")
     with get_connection() as connection:
         with connection.cursor() as cursor:
-            return _record_attendance(cursor, registration_id, scanner_id, scanner_role)
+            return _record_attendance(cursor, registration_id, scanner_id, scanner_role, expected_event_id=event_id)
 
 
 def _load_attempt_state(cursor, organizer_id, event_id):

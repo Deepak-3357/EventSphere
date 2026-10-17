@@ -319,10 +319,12 @@ def start_event(event_id):
             return error("FORBIDDEN", "You may only start your own events", 403)
         if existing["status"] != "published":
             return error("INVALID_STATE", "Only published events can be manually started", 409)
+        if existing.get("operational_state") == "ended":
+            return error("INVALID_STATE", "Cannot start an event that has already ended", 409)
         result = event_service.start_event(event_id, g.current_user["id"])
         return success(result)
     except ValueError as exc:
-        return error("VALIDATION_ERROR", str(exc), 422)
+        return error("INVALID_STATE" if "ended" in str(exc).lower() else "VALIDATION_ERROR", str(exc), 409 if "ended" in str(exc).lower() else 422)
     except DatabaseError:
         return _handle_database_error()
 
@@ -343,6 +345,11 @@ def end_event(event_id):
             return error("FORBIDDEN", "You may only end your own events", 403)
         if existing["status"] != "published":
             return error("INVALID_STATE", "Only published events can be manually ended", 409)
+        # "scheduled" means the event was never manually started. Ending it would
+        # violate events_lifecycle_order_check, so refuse it here. An already-ended
+        # event stays idempotent and still reaches the service.
+        if existing.get("operational_state") == "scheduled":
+            return error("INVALID_STATE", "Only started events can be manually ended", 409)
         result = event_service.end_event(event_id, g.current_user["id"])
         return success(result)
     except ValueError as exc:

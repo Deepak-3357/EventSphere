@@ -12,6 +12,8 @@ from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+import psycopg
+
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
@@ -75,7 +77,7 @@ class EventPayloadLifecycleTestCase(unittest.TestCase):
         """Regression for D1: idempotent branch unpacks started_at/started_by."""
         import inspect
         source = inspect.getsource(event_service.start_event)
-        self.assertIn("_, event_status, started_at, started_by = row", source)
+        self.assertIn("_, event_status, started_at, started_by, ended_at = row", source)
         # No module-level globals mask an unpack bug.
         import app.services.event_service as module
         self.assertFalse(hasattr(module, "started_at"))
@@ -361,6 +363,627 @@ class ManualLifecycleApiTestCase(unittest.TestCase):
                 self.client.put(f"/api/events/{event_id}", json={"title": "Edited"}, headers={"Authorization": "Bearer t"})
                 listed = self.client.get(f"/api/events/{event_id}/faqs", headers={"Authorization": "Bearer t"})
                 self.assertEqual(listed.get_json()["data"][0]["answer"], "Soon")
+
+
+LIFECYCLE_EVENT_ID = "00000000-0000-0000-0000-0000000000aa"
+LIFECYCLE_ACTOR_ID = "00000000-0000-0000-0000-0000000000ab"
+
+
+class RecordingCursor:
+    """Cursor stub that records SQL so a test can prove nothing was written."""
+
+    def __init__(self, row):
+        self.row = row
+        self.statements = []
+
+    def execute(self, statement, params=None):
+        self.statements.append(" ".join(statement.split()))
+
+    def fetchone(self):
+        return self.row
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+    def wrote(self, needle):
+        return any(needle in statement.lower() for statement in self.statements)
+
+    def mutated(self):
+        """True if any statement writes. Ignores the locking `select ... for update`."""
+
+        return any(
+            statement.split(" ", 1)[0] in {"update", "insert", "delete"}
+            for statement in self.statements
+        )
+
+
+class StubConnection:
+    def __init__(self, row):
+        self.cursor_instance = RecordingCursor(row)
+
+    def cursor(self):
+        return self.cursor_instance
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+class ConstraintCursor(RecordingCursor):
+    """Stands in for PostgreSQL enforcing events_lifecycle_order_check.
+
+    A real INSERT/UPDATE that breaks the CHECK raises psycopg.errors.CheckViolation,
+    which is a DatabaseError and is therefore swallowed by the route's error branch
+    as a generic HTTP 500. Reproducing that here is what makes the API test below a
+    genuine "no longer a 500" regression test rather than a status-code assertion.
+    """
+
+    def execute(self, statement, params=None):
+        if " ".join(statement.split()).lower().startswith("update"):
+            raise psycopg.errors.CheckViolation(
+                'new row for relation "events" violates check constraint '
+                '"events_lifecycle_order_check"'
+            )
+        super().execute(statement, params)
+
+
+class SingleCursorConnection:
+    """Connection stub built around one prepared cursor instance."""
+
+    def __init__(self, cursor):
+        self.cursor_instance = cursor
+
+    def cursor(self):
+        return self.cursor_instance
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+def lifecycle_row(status, started_at, ended_at, started_by=None, ended_by=None):
+    """Row shape of the select in end_event: id, status, started_at, started_by, ended_at, ended_by."""
+
+    return (
+        uuid.UUID(LIFECYCLE_EVENT_ID),
+        status,
+        started_at,
+        started_by,
+        ended_at,
+        ended_by,
+    )
+
+
+class EndEventServiceTestCase(unittest.TestCase):
+    """Database-free coverage of the manual End path in event_service.
+
+    Regression for the audit finding F1: a published event that was never started
+    used to reach the events_lifecycle_order_check constraint, so PostgreSQL raised
+    a CheckViolation and the route answered HTTP 500.
+    """
+
+    def setUp(self):
+        self.now = datetime.now(timezone.utc)
+
+    def _call(self, row):
+        connection = StubConnection(row)
+        patcher = patch("app.services.event_service.get_connection", return_value=connection)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        result, failure = None, None
+        try:
+            result = event_service.end_event(LIFECYCLE_EVENT_ID, LIFECYCLE_ACTOR_ID)
+        except ValueError as exc:
+            failure = exc
+        return result, failure, connection.cursor_instance
+
+    def test_never_started_event_is_refused_without_writing(self):
+        result, failure, cursor = self._call(lifecycle_row("published", None, None))
+
+        self.assertIsNone(result)
+        self.assertIsInstance(failure, ValueError)
+        self.assertIn("started", str(failure).lower())
+        self.assertFalse(cursor.mutated(), "end_event must not UPDATE a never-started event")
+        self.assertFalse(cursor.wrote("event_lifecycle_audit"), "no audit row for a refused end")
+
+    def test_started_event_is_ended_and_audited(self):
+        started = self.now - timedelta(minutes=5)
+        result, failure, cursor = self._call(
+            lifecycle_row("published", started, None, started_by=uuid.UUID(LIFECYCLE_ACTOR_ID))
+        )
+
+        self.assertIsNone(failure)
+        self.assertEqual(result["operational_state"], "ended")
+        self.assertFalse(result["already_ended"])
+        self.assertTrue(result["attendance_closed"])
+        self.assertTrue(cursor.mutated())
+        self.assertTrue(cursor.wrote("update events set ended_at"))
+        self.assertTrue(cursor.wrote("event_lifecycle_audit"))
+
+    def test_already_ended_event_is_idempotent_and_writes_nothing(self):
+        started = self.now - timedelta(hours=1)
+        result, failure, cursor = self._call(lifecycle_row("published", started, self.now))
+
+        self.assertIsNone(failure)
+        self.assertTrue(result["already_ended"])
+        self.assertEqual(result["operational_state"], "ended")
+        self.assertFalse(cursor.mutated(), "a repeated end must not rewrite the row")
+        self.assertFalse(cursor.wrote("event_lifecycle_audit"))
+
+    def test_unpublished_event_is_refused(self):
+        result, failure, cursor = self._call(lifecycle_row("draft", None, None))
+
+        self.assertIsNone(result)
+        self.assertIsInstance(failure, ValueError)
+        self.assertIn("published", str(failure).lower())
+        self.assertFalse(cursor.mutated())
+
+    def test_missing_event_returns_none(self):
+        result, failure, _ = self._call(None)
+
+        self.assertIsNone(result)
+        self.assertIsNone(failure)
+
+
+class EndEventApiTestCase(unittest.TestCase):
+    """Database-free API coverage: POST /api/events/<id>/end must answer with a
+    controlled client error and must never reach a database write for an event
+    that was never started."""
+
+    def setUp(self):
+        app = create_app()
+        app.config.update(TESTING=True)
+        self.client = app.test_client()
+
+    def _published_event(self, operational_state):
+        # Mirrors serialize_event: started_at/ended_at are popped, and
+        # operational_state is only attached to published events.
+        return {
+            "id": LIFECYCLE_EVENT_ID,
+            "title": "Lifecycle Test Event",
+            "status": "published",
+            "operational_state": operational_state,
+            "organizer": {"id": ORGANIZER["id"], "name": "Rohan Iyer"},
+        }
+
+    def _post_end(self, operational_state, confirm=True, service_result=None):
+        with patch("app.routes.auth.verify_access_token", return_value=ORGANIZER), patch(
+            "app.routes.auth._load_profile", return_value=profile(ORGANIZER, "organizer")
+        ), patch.object(
+            event_service, "get_event", return_value=self._published_event(operational_state)
+        ), patch.object(
+            event_service, "end_event", return_value=service_result
+        ) as end_event_mock:
+            response = self.client.post(
+                f"/api/events/{LIFECYCLE_EVENT_ID}/end",
+                json={"confirm": confirm},
+                headers={"Authorization": "Bearer test-token"},
+            )
+        return response, end_event_mock
+
+    def test_published_but_never_started_is_a_client_error_not_a_500(self):
+        response, end_event_mock = self._post_end("scheduled")
+
+        self.assertLess(response.status_code, 500, response.get_data(as_text=True))
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["error"]["code"], "INVALID_STATE")
+        end_event_mock.assert_not_called()
+
+    def test_running_event_still_reaches_the_service(self):
+        response, end_event_mock = self._post_end(
+            "running",
+            service_result={"id": LIFECYCLE_EVENT_ID, "operational_state": "ended", "already_ended": False},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.get_json()["data"]["already_ended"])
+        end_event_mock.assert_called_once()
+
+    def test_already_ended_event_remains_idempotent(self):
+        response, end_event_mock = self._post_end(
+            "ended",
+            service_result={"id": LIFECYCLE_EVENT_ID, "operational_state": "ended", "already_ended": True},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["data"]["already_ended"])
+        end_event_mock.assert_called_once()
+
+    def test_never_started_end_never_reaches_the_lifecycle_check(self):
+        """End-to-end through the real service with the CHECK enforced.
+
+        Without the guard this UPDATE raises CheckViolation and the route answers
+        500; the guard must keep the request at a client error and off the table.
+        """
+
+        self.assertTrue(issubclass(psycopg.errors.CheckViolation, psycopg.DatabaseError))
+        cursor = ConstraintCursor(lifecycle_row("published", None, None))
+        with patch("app.routes.auth.verify_access_token", return_value=ORGANIZER), patch(
+            "app.routes.auth._load_profile", return_value=profile(ORGANIZER, "organizer")
+        ), patch.object(
+            event_service, "get_event", return_value=self._published_event("scheduled")
+        ), patch(
+            "app.services.event_service.get_connection", return_value=SingleCursorConnection(cursor)
+        ):
+            response = self.client.post(
+                f"/api/events/{LIFECYCLE_EVENT_ID}/end",
+                json={"confirm": True},
+                headers={"Authorization": "Bearer test-token"},
+            )
+
+        self.assertNotEqual(response.status_code, 500, response.get_data(as_text=True))
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["error"]["code"], "INVALID_STATE")
+        self.assertFalse(cursor.mutated(), "the guard must stop the write before the CHECK")
+
+    def test_missing_confirmation_is_rejected_before_any_lookup(self):
+        with patch("app.routes.auth.verify_access_token", return_value=ORGANIZER), patch(
+            "app.routes.auth._load_profile", return_value=profile(ORGANIZER, "organizer")
+        ), patch.object(event_service, "get_event") as get_event_mock:
+            response = self.client.post(
+                f"/api/events/{LIFECYCLE_EVENT_ID}/end",
+                json={},
+                headers={"Authorization": "Bearer test-token"},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["error"]["code"], "CONFIRMATION_REQUIRED")
+        get_event_mock.assert_not_called()
+
+
+def lifecycle_start_row(status, started_at, ended_at, started_by=None):
+    return (
+        uuid.UUID(LIFECYCLE_EVENT_ID),
+        status,
+        started_at,
+        started_by,
+        ended_at,
+    )
+
+
+class StartEventServiceTestCase(unittest.TestCase):
+    def setUp(self):
+        self.now = datetime.now(timezone.utc)
+
+    def _call(self, row):
+        connection = StubConnection(row)
+        patcher = patch("app.services.event_service.get_connection", return_value=connection)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        result, failure = None, None
+        try:
+            result = event_service.start_event(LIFECYCLE_EVENT_ID, LIFECYCLE_ACTOR_ID)
+        except ValueError as exc:
+            failure = exc
+        return result, failure, connection.cursor_instance
+
+    def test_scheduled_event_is_started_and_audited(self):
+        result, failure, cursor = self._call(lifecycle_start_row("published", None, None))
+        self.assertIsNone(failure)
+        self.assertEqual(result["operational_state"], "running")
+        self.assertFalse(result["already_started"])
+        self.assertTrue(cursor.mutated())
+        self.assertTrue(cursor.wrote("update events set started_at"))
+        self.assertTrue(cursor.wrote("event_lifecycle_audit"))
+
+    def test_already_started_event_is_idempotent(self):
+        started = self.now - timedelta(minutes=10)
+        result, failure, cursor = self._call(lifecycle_start_row("published", started, None, started_by=uuid.UUID(LIFECYCLE_ACTOR_ID)))
+        self.assertIsNone(failure)
+        self.assertTrue(result["already_started"])
+        self.assertEqual(result["operational_state"], "running")
+        self.assertFalse(cursor.mutated())
+
+    def test_already_ended_event_refuses_start_without_writing(self):
+        started = self.now - timedelta(hours=1)
+        ended = self.now - timedelta(minutes=5)
+        result, failure, cursor = self._call(lifecycle_start_row("published", started, ended))
+        self.assertIsNone(result)
+        self.assertIsInstance(failure, ValueError)
+        self.assertIn("ended", str(failure).lower())
+        self.assertFalse(cursor.mutated())
+
+    def test_draft_event_refuses_start(self):
+        result, failure, cursor = self._call(lifecycle_start_row("draft", None, None))
+        self.assertIsNone(result)
+        self.assertIsInstance(failure, ValueError)
+        self.assertIn("published", str(failure).lower())
+        self.assertFalse(cursor.mutated())
+
+
+class StartEventApiTestCase(unittest.TestCase):
+    def setUp(self):
+        app = create_app()
+        app.config.update(TESTING=True)
+        self.client = app.test_client()
+
+    def _published_event(self, operational_state):
+        return {
+            "id": LIFECYCLE_EVENT_ID,
+            "title": "Lifecycle Test Event",
+            "status": "published",
+            "operational_state": operational_state,
+            "organizer": {"id": ORGANIZER["id"], "name": "Rohan Iyer"},
+        }
+
+    def _post_start(self, operational_state, service_result=None):
+        with patch("app.routes.auth.verify_access_token", return_value=ORGANIZER), patch(
+            "app.routes.auth._load_profile", return_value=profile(ORGANIZER, "organizer")
+        ), patch.object(
+            event_service, "get_event", return_value=self._published_event(operational_state)
+        ), patch.object(
+            event_service, "start_event", return_value=service_result
+        ) as start_event_mock:
+            response = self.client.post(
+                f"/api/events/{LIFECYCLE_EVENT_ID}/start",
+                headers={"Authorization": "Bearer test-token"},
+            )
+        return response, start_event_mock
+
+    def test_already_ended_event_start_is_client_error(self):
+        response, start_mock = self._post_start("ended")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["error"]["code"], "INVALID_STATE")
+        start_mock.assert_not_called()
+
+    def test_scheduled_event_start_succeeds(self):
+        response, start_mock = self._post_start(
+            "scheduled",
+            service_result={"id": LIFECYCLE_EVENT_ID, "operational_state": "running", "already_started": False},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.get_json()["data"]["already_started"])
+        start_mock.assert_called_once()
+
+
+class AttendanceQrCheckInApiTestCase(unittest.TestCase):
+    def setUp(self):
+        app = create_app()
+        app.config.update(TESTING=True, ATTENDANCE_QR_SECRET="test-secret")
+        self.client = app.test_client()
+        self.app = app
+
+    def _auth(self, user=ORGANIZER, role="organizer"):
+        return patch.multiple(
+            "app.routes.auth",
+            verify_access_token=lambda token: user,
+            _load_profile=lambda user_id: profile(user, role),
+        )
+
+    def test_wrong_event_qr_is_rejected(self):
+        import json
+        registration_id = str(uuid.uuid4())
+        other_event_id = str(uuid.uuid4())
+        with self.app.app_context():
+            payload = attendance_service._signed_payload(registration_id)
+
+        row = (
+            uuid.UUID(registration_id),
+            "registered",
+            uuid.UUID(STUDENT["id"]),
+            uuid.UUID(LIFECYCLE_EVENT_ID),
+            uuid.UUID(ORGANIZER["id"]),
+            "Event Title",
+            date.today(),
+            time(10, 0),
+            time(12, 0),
+            "published",
+            "Student Name",
+            datetime.now(timezone.utc) - timedelta(minutes=5),
+            None,
+        )
+
+        cursor = RecordingCursor(row)
+        with self._auth(), patch("app.services.attendance_service.get_connection", return_value=SingleCursorConnection(cursor)):
+            response = self.client.post(
+                "/api/attendance/check-in",
+                query_string={"event_id": other_event_id},
+                json={"qr_payload": payload},
+                headers={"Authorization": "Bearer test-token"},
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["error"]["code"], "WRONG_EVENT")
+        self.assertFalse(cursor.mutated(), "Wrong event must never write attendance")
+
+    def test_correct_event_qr_records_attendance(self):
+        registration_id = str(uuid.uuid4())
+        attendance_id = str(uuid.uuid4())
+        with self.app.app_context():
+            payload = attendance_service._signed_payload(registration_id)
+
+        row = (
+            uuid.UUID(registration_id),
+            "registered",
+            uuid.UUID(STUDENT["id"]),
+            uuid.UUID(LIFECYCLE_EVENT_ID),
+            uuid.UUID(ORGANIZER["id"]),
+            "Event Title",
+            date.today(),
+            time(10, 0),
+            time(12, 0),
+            "published",
+            "Student Name",
+            datetime.now(timezone.utc) - timedelta(minutes=5),
+            None,
+        )
+
+        class MultiStepCursor(RecordingCursor):
+            def __init__(self):
+                super().__init__(row)
+                self.step = 0
+
+            def fetchone(self):
+                self.step += 1
+                if self.step == 1:
+                    return row
+                elif self.step == 2:
+                    return None
+                elif self.step == 3:
+                    return (uuid.UUID(attendance_id), datetime.now(timezone.utc), "present")
+                return None
+
+        cursor = MultiStepCursor()
+        with self._auth(), patch("app.services.attendance_service.get_connection", return_value=SingleCursorConnection(cursor)):
+            response = self.client.post(
+                "/api/attendance/check-in",
+                query_string={"event_id": LIFECYCLE_EVENT_ID},
+                json={"qr_payload": payload},
+                headers={"Authorization": "Bearer test-token"},
+            )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.get_json()["data"]["status"], "present")
+        self.assertTrue(cursor.wrote("insert into attendance"))
+
+    def test_unauthorized_organizer_qr_is_rejected(self):
+        registration_id = str(uuid.uuid4())
+        with self.app.app_context():
+            payload = attendance_service._signed_payload(registration_id)
+
+        row = (
+            uuid.UUID(registration_id),
+            "registered",
+            uuid.UUID(STUDENT["id"]),
+            uuid.UUID(LIFECYCLE_EVENT_ID),
+            uuid.UUID(OTHER_ORGANIZER["id"]),
+            "Event Title",
+            date.today(),
+            time(10, 0),
+            time(12, 0),
+            "published",
+            "Student Name",
+            datetime.now(timezone.utc) - timedelta(minutes=5),
+            None,
+        )
+        cursor = RecordingCursor(row)
+        with self._auth(ORGANIZER, "organizer"), patch("app.services.attendance_service.get_connection", return_value=SingleCursorConnection(cursor)):
+            response = self.client.post(
+                "/api/attendance/check-in",
+                json={"qr_payload": payload},
+                headers={"Authorization": "Bearer test-token"},
+            )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["error"]["code"], "FORBIDDEN")
+        self.assertFalse(cursor.mutated())
+
+    def test_duplicate_qr_scan_is_rejected(self):
+        registration_id = str(uuid.uuid4())
+        with self.app.app_context():
+            payload = attendance_service._signed_payload(registration_id)
+
+        row = (
+            uuid.UUID(registration_id),
+            "registered",
+            uuid.UUID(STUDENT["id"]),
+            uuid.UUID(LIFECYCLE_EVENT_ID),
+            uuid.UUID(ORGANIZER["id"]),
+            "Event Title",
+            date.today(),
+            time(10, 0),
+            time(12, 0),
+            "published",
+            "Student Name",
+            datetime.now(timezone.utc) - timedelta(minutes=5),
+            None,
+        )
+
+        class DuplicateCursor(RecordingCursor):
+            def __init__(self):
+                super().__init__(row)
+                self.step = 0
+
+            def fetchone(self):
+                self.step += 1
+                if self.step == 1:
+                    return row
+                elif self.step == 2:
+                    return (uuid.UUID(str(uuid.uuid4())),)
+                return None
+
+        cursor = DuplicateCursor()
+        with self._auth(), patch("app.services.attendance_service.get_connection", return_value=SingleCursorConnection(cursor)):
+            response = self.client.post(
+                "/api/attendance/check-in",
+                json={"qr_payload": payload},
+                headers={"Authorization": "Bearer test-token"},
+            )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["error"]["code"], "ALREADY_CHECKED_IN")
+        self.assertFalse(cursor.wrote("insert into attendance"))
+
+    def test_ended_event_qr_scan_is_rejected(self):
+        registration_id = str(uuid.uuid4())
+        with self.app.app_context():
+            payload = attendance_service._signed_payload(registration_id)
+
+        row = (
+            uuid.UUID(registration_id),
+            "registered",
+            uuid.UUID(STUDENT["id"]),
+            uuid.UUID(LIFECYCLE_EVENT_ID),
+            uuid.UUID(ORGANIZER["id"]),
+            "Event Title",
+            date.today(),
+            time(10, 0),
+            time(12, 0),
+            "published",
+            "Student Name",
+            datetime.now(timezone.utc) - timedelta(hours=2),
+            datetime.now(timezone.utc) - timedelta(minutes=30),
+        )
+        cursor = RecordingCursor(row)
+        with self._auth(), patch("app.services.attendance_service.get_connection", return_value=SingleCursorConnection(cursor)):
+            response = self.client.post(
+                "/api/attendance/check-in",
+                json={"qr_payload": payload},
+                headers={"Authorization": "Bearer test-token"},
+            )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["error"]["code"], "EVENT_ENDED")
+        self.assertFalse(cursor.mutated())
+
+    def test_forged_qr_payload_is_rejected_before_db(self):
+        import json
+        with self._auth():
+            response = self.client.post(
+                "/api/attendance/check-in",
+                json={"qr_payload": json.dumps({"registration_id": str(uuid.uuid4()), "token": "bad-token", "type": "eventsphere_attendance"})},
+                headers={"Authorization": "Bearer test-token"},
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["error"]["code"], "INVALID_QR")
+
+
+class EventListingScopeTestCase(unittest.TestCase):
+    def setUp(self):
+        app = create_app()
+        app.config.update(TESTING=True)
+        self.client = app.test_client()
+
+    def test_public_listing_hides_draft_and_pending(self):
+        with patch.object(event_service, "list_events", return_value=([], 0)) as list_mock:
+            self.client.get("/api/events")
+        args, _ = list_mock.call_args
+        filters, role, user_id = args
+        self.assertIsNone(role)
+        self.assertIsNone(user_id)
+
+    def test_organizer_listing_is_scoped_to_user_id(self):
+        with patch("app.routes.events.verify_access_token", return_value=ORGANIZER), patch(
+            "app.routes.events._load_profile", return_value=profile(ORGANIZER, "organizer")
+        ), patch.object(event_service, "list_events", return_value=([], 0)) as list_mock:
+            response = self.client.get("/api/events", headers={"Authorization": "Bearer test-token"})
+        self.assertEqual(response.status_code, 200)
+        args, _ = list_mock.call_args
+        filters, role, user_id = args
+        self.assertEqual(role, "organizer")
+        self.assertEqual(user_id, ORGANIZER["id"])
 
 
 if __name__ == "__main__":

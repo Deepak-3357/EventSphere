@@ -50,7 +50,13 @@ def check_in():
     if not isinstance(body.get("qr_payload"), str):
         return error("MALFORMED_QR", "qr_payload is required", 400)
     try:
-        result = attendance_service.check_in(body["qr_payload"], g.current_user["id"], g.current_profile["role"])
+        event_id = request.args.get("event_id") or body.get("event_id")
+        result = attendance_service.check_in(
+            body["qr_payload"],
+            g.current_user["id"],
+            g.current_profile["role"],
+            event_id=event_id,
+        )
         return success(result, status=201)
     except attendance_service.AttendanceError as exc:
         return error(exc.code, exc.message, exc.status)

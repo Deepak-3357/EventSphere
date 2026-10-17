@@ -10,6 +10,10 @@ fetch(apiUrl("/api/events?limit=100"))
   .then(({ response, body }) => {
     if (!response.ok) throw new Error(body.error?.message || "Events could not be loaded.");
     listMessage.textContent = `${body.pagination.total} published event${body.pagination.total === 1 ? "" : "s"}`;
+    if (!body.data || body.data.length === 0) {
+      listElement.innerHTML = '<div class="col-12"><div class="alert alert-info border-0 shadow-sm">No published events available at this time. Check back soon!</div></div>';
+      return;
+    }
     listElement.innerHTML = body.data.map((event) => `
       <div class="col-md-6 col-lg-4">
         <article class="card h-100 border-0 shadow-sm event-card"><img class="event-cover" src="${escapeHtml(event.image_url || "../assets/img/event-fallback.svg")}" alt="Cover image for ${escapeHtml(event.title)}" onerror="this.onerror=null;this.src='../assets/img/event-fallback.svg';"><div class="card-body">
@@ -21,4 +25,8 @@ fetch(apiUrl("/api/events?limit=100"))
         </div></article>
       </div>`).join("");
   })
-  .catch((error) => { listMessage.className = "small text-danger"; listMessage.textContent = error.message; });
+  .catch((error) => {
+    listMessage.className = "small text-danger mb-3";
+    listMessage.textContent = error.message;
+    listElement.innerHTML = `<div class="col-12"><div class="alert alert-danger border-0 shadow-sm">Failed to load events: ${escapeHtml(error.message)}</div></div>`;
+  });
