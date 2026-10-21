@@ -6,9 +6,12 @@ function safePdfFilename(letterNumber) { return `${String(letterNumber || "event
     const client = await getSupabaseClient(); const session = (await client.auth.getSession()).data.session; if (!session) { redirectToLogin("student"); return; }
     const headers = { Authorization: `Bearer ${session.access_token}` };
     if (!registrationId) { const response = await fetch(`${apiRoot}/my-registrations?status=registered`, { headers }); const body = await response.json(); if (!response.ok) throw new Error(body.error?.message || "Registrations could not be loaded."); const list = document.querySelector("#odList"); list.replaceChildren(); if (!body.data.length) { odMessage.textContent = "No active registrations are eligible for an OD letter."; return; } odMessage.textContent = "Choose an active registration to generate an OD letter."; body.data.forEach((item) => { const link = document.createElement("a"); link.className = "list-group-item list-group-item-action"; link.href = `?registration_id=${encodeURIComponent(item.registration_id)}`; link.textContent = `${item.event.title} · ${item.event.event_date}`; list.append(link); }); return; }
-    const registration = await fetch(`${apiRoot}/registrations/${encodeURIComponent(registrationId)}`, { headers }); const registrationBody = await registration.json(); if (!registration.ok) throw new Error(registrationBody.error?.message || "Registration could not be loaded.");
+    const [registration, existing] = await Promise.all([
+      fetch(`${apiRoot}/registrations/${encodeURIComponent(registrationId)}`, { headers }),
+      fetch(`${apiRoot}/registrations/${encodeURIComponent(registrationId)}/od-letter`, { headers })
+    ]);
+    const registrationBody = await registration.json(); if (!registration.ok) throw new Error(registrationBody.error?.message || "Registration could not be loaded.");
     document.querySelector("#odEvent").textContent = registrationBody.data.event.title; document.querySelector("#odMeta").textContent = `${registrationBody.data.event.event_date} · ${registrationBody.data.event.venue.name}`; odCard.classList.remove("d-none");
-    const existing = await fetch(`${apiRoot}/registrations/${encodeURIComponent(registrationId)}/od-letter`, { headers });
     if (existing.ok) {
       const existingBody = await existing.json();
       setup(existingBody.data, session);

@@ -171,6 +171,18 @@ def validate_event_payload(payload, current=None, requested_status=None):
     }
 
 
+class SchemaNotReadyError(Exception):
+    """Raised when an operation requires database schema objects that are not yet applied."""
+
+    def __init__(
+        self,
+        message="Manual event lifecycle requires pending database migration (supabase/migrations/20261012100000_manual_event_lifecycle.sql)",
+    ):
+        super().__init__(message)
+        self.code = "SCHEMA_OUTDATED"
+        self.status = 503
+
+
 def reset_lifecycle_column_cache():
     """Forget the cached lifecycle-column probe (tests and after migration)."""
 
@@ -460,6 +472,9 @@ def update_event(event_id, payload):
 def start_event(event_id, actor_id):
     """Manually mark a published event as started. Idempotent and owner-safe."""
 
+    if not include_lifecycle_columns():
+        raise SchemaNotReadyError()
+
     with get_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -502,6 +517,9 @@ def start_event(event_id, actor_id):
 
 def end_event(event_id, actor_id):
     """Manually end a running event; closes attendance and persists the state."""
+
+    if not include_lifecycle_columns():
+        raise SchemaNotReadyError()
 
     with get_connection() as connection:
         with connection.cursor() as cursor:
@@ -559,6 +577,9 @@ def _record_lifecycle_audit(cursor, event_id, action, actor_id):
 
 def unpublish_event(event_id, actor_id):
     """Explicit unpublish of a Published event back to Draft, with audit row."""
+
+    if not include_lifecycle_columns():
+        raise SchemaNotReadyError()
 
     with get_connection() as connection:
         with connection.cursor() as cursor:

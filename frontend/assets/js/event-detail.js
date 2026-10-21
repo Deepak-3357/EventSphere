@@ -6,13 +6,19 @@ async function loadEvent() {
   if (!eventId) throw new Error("An event ID is required.");
   let session = null;
   try { const client = await getSupabaseClient(); session = (await client.auth.getSession()).data.session; } catch (_) { /* Public details remain available. */ }
-  const response = await fetch(apiUrl(`/api/events/${encodeURIComponent(eventId)}`), { headers: session ? { Authorization: `Bearer ${session.access_token}` } : {} });
+  const headers = session ? { Authorization: `Bearer ${session.access_token}` } : {};
+  const [response, faqResponse] = await Promise.all([
+    fetch(apiUrl(`/api/events/${encodeURIComponent(eventId)}`), { headers }),
+    fetch(apiUrl(`/api/events/${encodeURIComponent(eventId)}/faqs`)).catch(() => null)
+  ]);
   const body = await response.json();
   if (!response.ok) throw new Error(body.error?.message || "Event could not be loaded.");
   const event = body.data;
   const open = event.status === "published" && event.available_seats > 0 && new Date(event.registration_deadline) > new Date();
   let faqs = [];
-  try { const faqResponse = await fetch(apiUrl(`/api/events/${encodeURIComponent(eventId)}/faqs`)); if (faqResponse.ok) faqs = (await faqResponse.json()).data || []; } catch (_) { /* Details remain usable. */ }
+  if (faqResponse && faqResponse.ok) {
+    try { faqs = (await faqResponse.json()).data || []; } catch (_) {}
+  }
   const faqMarkup = faqs.length ? faqs.map((faq, index) => `<div class="accordion-item"><h3 class="accordion-header"><button class="accordion-button ${index ? "collapsed" : ""}" type="button" data-bs-toggle="collapse" data-bs-target="#faq-${index}" aria-expanded="${index ? "false" : "true"}">${detailEscape(faq.question)}</button></h3><div id="faq-${index}" class="accordion-collapse collapse ${index ? "" : "show"}"><div class="accordion-body">${detailEscape(faq.answer)}</div></div></div>`).join("") : '<p class="text-secondary mb-0">The organizer has not added event FAQs yet.</p>';
   const participation = event.participation_mode === "individual" ? "Individual participation" : event.participation_mode === "team" ? `Team participation (${event.min_team_size}–${event.max_team_size} members)` : `Individual or team participation (${event.min_team_size}–${event.max_team_size} members)`;
   const modeControl = event.participation_mode === "both" ? `<label class="form-label" for="participationType">Registration type</label><select id="participationType" class="form-select mb-2"><option value="individual">Individual</option><option value="team">Team</option></select>` : "";

@@ -74,7 +74,7 @@ def _qr_image_data_url(payload):
 
     image = qrcode.make(payload)
     buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
+    image.save(buffer)
     encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
     return f"data:image/png;base64,{encoded}"
 
@@ -306,7 +306,7 @@ def _record_attendance(cursor, registration_id, scanner_id, scanner_role, expect
                   {lifecycle_timestamp_sql("e")}
            from registrations r join events e on e.id = r.event_id
            join profiles p on p.id = r.student_id
-           where r.id = %s for update""",
+           where r.id = %s for update of r""",
         (registration_id,),
     )
     row = cursor.fetchone()
@@ -337,8 +337,9 @@ def _record_attendance(cursor, registration_id, scanner_id, scanner_role, expect
     except UniqueViolation:
         raise AttendanceError("ALREADY_CHECKED_IN", "This registration is already checked in", 409)
     attendance_id, checked_in_at, status = cursor.fetchone()
+    revoke_attendance_code(cursor, registration_id)
     return {"attendance_id": str(attendance_id), "registration_id": str(registration_id),
-                    "event_id": str(row[3]), "status": status, "checked_in_at": _json_value(checked_in_at),
+            "event_id": str(row[3]), "status": status, "checked_in_at": _json_value(checked_in_at),
             "event_title": row[5], "student_name": row[10]}
 
 
@@ -414,6 +415,8 @@ def manual_check_in(event_id, code, scanner_id, scanner_role):
                 raise AttendanceError("EVENT_NOT_FOUND", "Event not found", 404)
             if scanner_role == "organizer" and str(event[0]) != str(scanner_id):
                 raise AttendanceError("FORBIDDEN", "You do not own this event", 403)
+            if event[1] != "published":
+                raise AttendanceError("EVENT_UNAVAILABLE", "Event is not available for attendance", 409)
             state = _load_attempt_state(cursor, scanner_id, event_id)
             if state[2] and state[2].timestamp() > datetime.now().astimezone().timestamp():
                 raise AttendanceError("RATE_LIMITED", "Too many invalid attendance code attempts. Try again shortly.", 429)

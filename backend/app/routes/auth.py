@@ -1,7 +1,9 @@
 """Supabase Auth token verification and role-protected validation endpoints."""
 
 from functools import wraps
+import hashlib
 import json
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -12,6 +14,27 @@ from app.utils.responses import error
 
 
 auth_bp = Blueprint("auth", __name__)
+
+_TOKEN_CACHE = {}
+_PROFILE_CACHE = {}
+TOKEN_CACHE_TTL = 30
+PROFILE_CACHE_TTL = 30
+MAX_CACHE_ENTRIES = 1000
+
+
+def _prune_cache(cache, max_entries=MAX_CACHE_ENTRIES):
+    if len(cache) >= max_entries:
+        now = time.monotonic()
+        expired = [k for k, v in cache.items() if v[1] <= now]
+        for k in expired:
+            cache.pop(k, None)
+        if len(cache) >= max_entries:
+            cache.clear()
+
+
+def clear_auth_cache():
+    _TOKEN_CACHE.clear()
+    _PROFILE_CACHE.clear()
 
 
 def _unauthorized(message="Authentication required"):
@@ -28,6 +51,12 @@ def _extract_bearer_token():
 
 def verify_access_token(token):
     """Verify a Supabase access token through the Auth user endpoint."""
+
+    now = time.monotonic()
+    token_key = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    cached = _TOKEN_CACHE.get(token_key)
+    if cached and cached[1] > now:
+        return cached[0]
 
     supabase_url = current_app.config.get("SUPABASE_URL", "").rstrip("/")
     publishable_key = current_app.config.get("SUPABASE_ANON_KEY", "")
@@ -46,12 +75,21 @@ def verify_access_token(token):
         with urlopen(auth_request, timeout=5) as response:
             if response.status != 200:
                 return None
-            return json.loads(response.read().decode("utf-8"))
+            data = json.loads(response.read().decode("utf-8"))
+            _prune_cache(_TOKEN_CACHE)
+            _TOKEN_CACHE[token_key] = (data, now + TOKEN_CACHE_TTL)
+            return data
     except (HTTPError, URLError, TimeoutError, ValueError):
         return None
 
 
 def _load_profile(user_id):
+    now = time.monotonic()
+    user_key = str(user_id)
+    cached = _PROFILE_CACHE.get(user_key)
+    if cached and cached[1] > now:
+        return cached[0]
+
     with get_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -67,7 +105,10 @@ def _load_profile(user_id):
             if row is None:
                 return None
             columns = [description.name for description in cursor.description]
-            return dict(zip(columns, row))
+            profile = dict(zip(columns, row))
+            _prune_cache(_PROFILE_CACHE)
+            _PROFILE_CACHE[user_key] = (profile, now + PROFILE_CACHE_TTL)
+            return profile
 
 
 def require_auth(view):

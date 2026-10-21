@@ -52,21 +52,19 @@ def organizer_dashboard(organizer_id):
     with get_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute(
-                """select count(distinct e.id) as total_events,
-                          count(distinct r.id) filter (where r.status = 'registered') as total_registrations,
-                          count(distinct a.id) filter (where a.status = 'present') as total_checked_in,
-                          count(distinct e.id) filter (where e.event_date >= current_date and e.status = 'published') as upcoming_events
-                   from events e left join registrations r on r.event_id = e.id
-                   left join attendance a on a.event_id = e.id
+                """select count(e.id) as total_events,
+                          coalesce(sum((select count(*) from registrations r where r.event_id = e.id and r.status = 'registered')), 0)::int as total_registrations,
+                          coalesce(sum((select count(*) from attendance a where a.event_id = e.id and a.status = 'present')), 0)::int as total_checked_in,
+                          count(e.id) filter (where e.event_date >= current_date and e.status = 'published') as upcoming_events
+                   from events e
                    where e.organizer_id = %s""", (organizer_id,))
             stats = dict(zip([item.name for item in cursor.description], cursor.fetchone()))
             cursor.execute(
                 """select e.id, e.title, e.event_date, e.status, e.capacity,
-                          count(distinct r.id) filter (where r.status = 'registered')::int as registrations,
-                          count(distinct a.id) filter (where a.status = 'present')::int as checked_in
-                   from events e left join registrations r on r.event_id = e.id
-                   left join attendance a on a.event_id = e.id
-                   where e.organizer_id = %s group by e.id order by e.event_date desc limit 20""", (organizer_id,))
+                          (select count(*) from registrations r where r.event_id = e.id and r.status = 'registered')::int as registrations,
+                          (select count(*) from attendance a where a.event_id = e.id and a.status = 'present')::int as checked_in
+                   from events e
+                   where e.organizer_id = %s order by e.event_date desc limit 20""", (organizer_id,))
             events = _rows(cursor)
             cursor.execute("""select e.status, count(*)::int as count from events e where e.organizer_id = %s
                              group by e.status order by e.status""", (organizer_id,))

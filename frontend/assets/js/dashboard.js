@@ -51,14 +51,20 @@ async function setupMasterAdmin(session, profile) {
   try {
     const client = await getSupabaseClient(); const session = (await client.auth.getSession()).data.session;
     if (!session) { redirectToLogin(role); return; }
-    const profileResponse = await fetch(`${apiBase}/auth/me`, { headers: { Authorization: `Bearer ${session.access_token}` } }); const profileBody = await profileResponse.json();
-    if (!profileResponse.ok) throw new Error(profileBody.error?.message || "Unable to verify your role.");
+    const profile = await verifiedProfile(session); const profileBody = { profile };
     if (profileBody.profile.role !== role) { window.location.replace(roleHomePath(profileBody.profile.role)); return; }
-    text("welcomeName", profileBody.profile.full_name); text("profileName", profileBody.profile.full_name); text("profileRole", role);
-    await setupMasterAdmin(session, profileBody.profile);
-    const response = await fetch(`${apiBase}/dashboard/${role}`, { headers: { Authorization: `Bearer ${session.access_token}` } }); const body = await response.json(); if (!response.ok) throw new Error(body.error?.message || "Unable to load dashboard data.");
+    text("welcomeName", profile.full_name); text("profileName", profile.full_name); text("profileRole", role);
+    await setupMasterAdmin(session, profile);
+    const [response, unread] = await Promise.all([
+      fetch(`${apiBase}/dashboard/${role}`, { headers: { Authorization: `Bearer ${session.access_token}` } }),
+      fetch(`${apiBase}/notifications/unread-count`, { headers: { Authorization: `Bearer ${session.access_token}` } })
+    ]);
+    const body = await response.json(); if (!response.ok) throw new Error(body.error?.message || "Unable to load dashboard data.");
     if (role === "student") renderStudent(body.data); else if (role === "organizer") renderOrganizer(body.data); else renderAdmin(body.data);
-    const unread = await fetch(`${apiBase}/notifications/unread-count`, { headers: { Authorization: `Bearer ${session.access_token}` } }); if (unread.ok) text("notificationCount", (await unread.json()).data.unread_count);
+    if (unread.ok) {
+      const unreadBody = await unread.json().catch(() => ({}));
+      text("notificationCount", unreadBody.data?.unread_count ?? "0");
+    }
     document.querySelector("#logoutButton").addEventListener("click", signOutAndRedirect); dashboardMessage.classList.add("d-none");
   } catch (error) { dashboardMessage.className = "alert alert-danger"; dashboardMessage.textContent = error.message; }
 })();

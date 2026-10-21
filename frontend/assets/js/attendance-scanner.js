@@ -58,6 +58,17 @@ async function loadAttendance(session) {
   if (response.status === 401) { redirectToLogin(scannerRole()); return; }
   const body = await response.json(); if (!response.ok) throw new Error(body.error?.message || "Attendance could not be loaded."); renderAttendance(body.data);
 }
+function getErrorMessageForStatus(status, serverMessage) {
+  if (serverMessage) return serverMessage;
+  if (status === 401) return "Session expired. Please log in again.";
+  if (status === 403) return "Access denied. You do not have permission to record attendance for this event.";
+  if (status === 404) return "Event or registration record not found.";
+  if (status === 409) return "Attendance conflict: Registration already checked in, or attendance is closed.";
+  if (status === 429) return "Too many attempts. Please try again shortly.";
+  if (status === 503) return "Service temporarily unavailable. Required database schema migration is pending.";
+  if (status === 500) return "Server error occurred while recording attendance.";
+  return `Attendance could not be recorded (HTTP ${status}).`;
+}
 async function clearScanner() {
   const activeScanner = qrScanner;
   qrScanner = null;
@@ -65,18 +76,31 @@ async function clearScanner() {
   try { await activeScanner.stop(); } catch (_) { /* The camera may already have stopped. */ }
   try { activeScanner.clear(); } catch (_) { /* The reader may already be empty. */ }
 }
+window.addEventListener("beforeunload", () => { clearScanner(); });
+window.addEventListener("pagehide", () => { clearScanner(); });
+window.addEventListener("popstate", () => { clearScanner(); });
 (async () => {
   try {
     const client = await getSupabaseClient(); const session = (await client.auth.getSession()).data.session;
     if (!session) { redirectToLogin(scannerRole()); return; }
-    getAuthToken = async () => {
+    getAuthToken = async (forceRefresh = false) => {
       try {
-        const { data } = await client.auth.getSession();
-        if (data?.session?.access_token) return data.session.access_token;
+        if (forceRefresh) {
+          const { data } = await client.auth.refreshSession();
+          if (data?.session?.access_token) return data.session.access_token;
+        } else {
+          const { data } = await client.auth.getSession();
+          if (data?.session?.access_token) return data.session.access_token;
+        }
       } catch (_) {}
       return session?.access_token || "";
     };
-    const events = await fetch(apiUrl("/api/events?limit=100"), { headers: { Authorization: `Bearer ${session.access_token}` } });
+    let token = (await getAuthToken()) || session.access_token;
+    let events = await fetch(apiUrl("/api/events?status=published&limit=100"), { headers: { Authorization: `Bearer ${token}` } });
+    if (events.status === 401) {
+      token = await getAuthToken(true);
+      if (token) events = await fetch(apiUrl("/api/events?status=published&limit=100"), { headers: { Authorization: `Bearer ${token}` } });
+    }
     if (events.status === 401) { redirectToLogin(scannerRole()); return; }
     const body = await events.json(); if (!events.ok) throw new Error(body.error?.message || "Events could not be loaded.");
     body.data.forEach((event) => { const option = document.createElement("option"); option.value = event.id; option.textContent = `${event.title} — ${event.event_date}`; eventSelect.append(option); });
@@ -107,15 +131,22 @@ async function clearScanner() {
         showScannerMessage("QR detected. Verifying attendance…");
         try {
           const checkInUrl = eventSelect.value ? apiUrl(`/api/attendance/check-in?event_id=${encodeURIComponent(eventSelect.value)}`) : apiUrl("/api/attendance/check-in");
-          const token = (await getAuthToken()) || session.access_token;
-          const response = await fetchWithTimeout(checkInUrl, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ qr_payload: qrPayload }) });
+          let authToken = (await getAuthToken()) || session.access_token;
+          let response = await fetchWithTimeout(checkInUrl, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ qr_payload: qrPayload }) });
+          if (response.status === 401) {
+            authToken = await getAuthToken(true);
+            if (authToken) {
+              response = await fetchWithTimeout(checkInUrl, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ qr_payload: qrPayload }) });
+            }
+          }
           if (response.status === 401) { redirectToLogin(scannerRole()); return; }
           const result = await response.json().catch(() => ({}));
           const attendance = result.data;
           if (!response.ok || result.success !== true || !attendance?.attendance_id || attendance.status !== "present") {
-            throw new Error(result.error?.message || `Attendance could not be recorded (HTTP ${response.status}).`);
+            throw new Error(getErrorMessageForStatus(response.status, result.error?.message));
           }
-          showScannerMessage("Check-in recorded.");
+          const studentLabel = attendance.student_name ? ` for ${attendance.student_name}` : "";
+          showScannerMessage(`Check-in recorded${studentLabel}.`);
           try {
             await loadAttendance(session);
           } catch (error) {
@@ -152,14 +183,23 @@ async function clearScanner() {
       checkInInProgress = true;
       showScannerMessage("Attendance code detected. Verifying attendance…");
       try {
-        const token = (await getAuthToken()) || session.access_token;
-        const response = await fetchWithTimeout(apiUrl("/api/attendance/manual-check-in"), { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ event_id: eventSelect.value, code }) });
+        let authToken = (await getAuthToken()) || session.access_token;
+        let response = await fetchWithTimeout(apiUrl("/api/attendance/manual-check-in"), { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ event_id: eventSelect.value, code }) });
+        if (response.status === 401) {
+          authToken = await getAuthToken(true);
+          if (authToken) {
+            response = await fetchWithTimeout(apiUrl("/api/attendance/manual-check-in"), { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ event_id: eventSelect.value, code }) });
+          }
+        }
         if (response.status === 401) { redirectToLogin(scannerRole()); return; }
         const result = await response.json().catch(() => ({}));
         const attendance = result.data;
-        if (!response.ok || result.success !== true || !attendance?.attendance_id || attendance.status !== "present") throw new Error(result.error?.message || `Attendance could not be recorded (HTTP ${response.status}).`);
+        if (!response.ok || result.success !== true || !attendance?.attendance_id || attendance.status !== "present") {
+          throw new Error(getErrorMessageForStatus(response.status, result.error?.message));
+        }
         document.querySelector("#attendanceCode").value = "";
-        showScannerMessage("Check-in recorded.");
+        const studentLabel = attendance.student_name ? ` for ${attendance.student_name}` : "";
+        showScannerMessage(`Check-in recorded${studentLabel}.`);
         try { await loadAttendance(session); } catch (error) { showScannerMessage(`Check-in recorded, but the attendance list could not be refreshed: ${error.message}`, true); }
       } catch (error) {
         const message = error.name === "AbortError" ? "Attendance verification timed out. Check the connection and try again." : (error.message || "Attendance could not be recorded. Please try again.");

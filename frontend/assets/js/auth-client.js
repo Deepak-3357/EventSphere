@@ -35,8 +35,26 @@ function consumeAuthorizedReturnTo(role) {
     return pending.path;
   } catch (_) { return null; }
 }
-function redirectToLogin(requiredRole) { saveReturnTo(requiredRole); window.location.replace("/login/"); }
-async function verifiedProfile(session) { const data = await callApi("/api/auth/me", session); if (!data.profile?.role) throw new Error("Authenticated role is unavailable."); return data.profile; }
+let cachedProfilePromise = null;
+let cachedProfileToken = null;
+
+async function verifiedProfile(session) {
+  if (!session || !session.access_token) throw new Error("Authenticated session is required.");
+  if (cachedProfileToken === session.access_token && cachedProfilePromise) {
+    return cachedProfilePromise;
+  }
+  cachedProfileToken = session.access_token;
+  cachedProfilePromise = (async () => {
+    const data = await callApi("/api/auth/me", session);
+    if (!data.profile?.role) throw new Error("Authenticated role is unavailable.");
+    return data.profile;
+  })().catch((err) => {
+    cachedProfilePromise = null;
+    cachedProfileToken = null;
+    throw err;
+  });
+  return cachedProfilePromise;
+}
 async function wireRoleAwareNavigation() {
   try {
     const client = await getSupabaseClient();

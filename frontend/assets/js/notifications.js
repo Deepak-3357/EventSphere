@@ -22,16 +22,18 @@ function renderNotifications(items) {
 
 let windowNotificationSession;
 async function loadNotifications() {
-  const response = await fetch(apiUrl("/api/notifications?limit=100"), { headers: { Authorization: `Bearer ${windowNotificationSession.access_token}` } });
+  const [response, unreadResponse] = await Promise.all([
+    fetch(apiUrl("/api/notifications?limit=100"), { headers: { Authorization: `Bearer ${windowNotificationSession.access_token}` } }),
+    fetch(apiUrl("/api/notifications/unread-count"), { headers: { Authorization: `Bearer ${windowNotificationSession.access_token}` } })
+  ]);
   const body = await response.json();
   if (!response.ok) throw new Error(body.error?.message || "Notifications could not be loaded.");
   renderNotifications(body.data);
-  const unreadResponse = await fetch(apiUrl("/api/notifications/unread-count"), { headers: { Authorization: `Bearer ${windowNotificationSession.access_token}` } });
-  const unreadBody = await unreadResponse.json();
-  const unread = unreadResponse.ok ? unreadBody.data.unread_count : 0;
+  const unreadBody = await unreadResponse.json().catch(() => ({}));
+  const unread = unreadResponse.ok ? (unreadBody.data?.unread_count ?? 0) : 0;
   unreadCountElement.textContent = unread;
   markAllButton.disabled = unread === 0;
-  notificationMessage.textContent = `${body.pagination.total} notification${body.pagination.total === 1 ? "" : "s"}`;
+  notificationMessage.textContent = `${body.pagination?.total ?? body.data.length} notification${body.pagination?.total === 1 ? "" : "s"}`;
 }
 
 (async () => {
