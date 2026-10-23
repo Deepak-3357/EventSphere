@@ -15,18 +15,18 @@ function text(id, value) { const node = document.querySelector(`#${id}`); if (no
 function badge(value) { const node = document.createElement("span"); node.className = "badge text-bg-secondary"; node.textContent = value || "—"; return node; }
 function listMessage(list, message) { const node = document.createElement("li"); node.className = "list-group-item text-secondary"; node.textContent = message; list.append(node); }
 function renderStudent(data) {
-  text("statUpcoming", data.stats.upcoming_events); text("statRegistrations", data.stats.registrations); text("statCheckedIn", `${data.stats.checked_in}/${data.stats.registrations}`); text("statNotifications", data.stats.unread_notifications);
+  text("statUpcoming", data.stats.upcoming_events); text("statRegistrations", data.stats.registrations); text("statNotifications", data.stats.unread_notifications);
   const events = document.querySelector("#upcomingEvents"); events.replaceChildren();
   if (!data.upcoming_events.length) listMessage(events, "No upcoming registered events.");
-  data.upcoming_events.forEach((event) => { const li = document.createElement("li"); li.className = "list-group-item d-flex justify-content-between align-items-center gap-2"; const label = document.createElement("span"); label.textContent = `${event.title} · ${event.event_date} · ${event.venue_name}`; li.append(label, badge(event.attendance_status)); events.append(li); });
+  data.upcoming_events.forEach((event) => { const li = document.createElement("li"); li.className = "list-group-item d-flex justify-content-between align-items-center gap-2"; const label = document.createElement("span"); label.textContent = `${event.title} · ${event.event_date} · ${event.venue_name}`; li.append(label, badge(event.registration_status)); events.append(li); });
   const notifications = document.querySelector("#recentNotifications"); notifications.replaceChildren();
   if (!data.recent_notifications.length) listMessage(notifications, "No recent notifications.");
   data.recent_notifications.forEach((item) => { const li = document.createElement("li"); li.className = "list-group-item"; li.textContent = `${item.title}: ${item.message}`; notifications.append(li); });
 }
 function renderOrganizer(data) {
-  text("statEvents", data.stats.total_events); text("statRegistrations", data.stats.total_registrations); text("statCheckedIn", data.stats.total_checked_in); text("statUpcoming", data.stats.upcoming_events);
+  text("statEvents", data.stats.total_events); text("statRegistrations", data.stats.total_registrations); text("statUpcoming", data.stats.upcoming_events);
   const rows = document.querySelector("#eventRows"); rows.replaceChildren(); if (!data.events.length) { listMessage(rows, "No events yet."); return; }
-  data.events.forEach((event) => { const row = document.createElement("tr"); [event.title, event.status, `${event.registrations}/${event.capacity}`, event.checked_in].forEach((value) => { const cell = document.createElement("td"); cell.textContent = value; row.append(cell); }); rows.append(row); });
+  data.events.forEach((event) => { const row = document.createElement("tr"); [event.title, event.status, `${event.registrations}/${event.capacity}`].forEach((value) => { const cell = document.createElement("td"); cell.textContent = value; row.append(cell); }); rows.append(row); });
   if (window.Chart) new Chart(document.querySelector("#analyticsChart"), { type: "doughnut", data: { labels: data.analytics.status_distribution.map((x) => x.status), datasets: [{ data: data.analytics.status_distribution.map((x) => x.count), backgroundColor: ["#315efb", "#ffc107", "#6c757d", "#dc3545", "#198754"] }] }, options: { responsive: true } });
 }
 function renderAdmin(data) {

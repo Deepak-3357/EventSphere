@@ -35,7 +35,6 @@ from app import create_app  # noqa: E402
 from app import schema_contract  # noqa: E402
 from app.routes import health as health_routes  # noqa: E402
 from app.services import (  # noqa: E402
-    attendance_service,
     dashboard_service,
     event_service,
     od_letter_service,
@@ -48,7 +47,6 @@ MIGRATIONS_DIR = ROOT / "supabase" / "migrations"
 # Modules that alias ``public.events`` as ``e`` in their SQL.
 EVENT_QUERY_MODULES = (
     event_service,
-    attendance_service,
     dashboard_service,
     registration_service,
     od_letter_service,

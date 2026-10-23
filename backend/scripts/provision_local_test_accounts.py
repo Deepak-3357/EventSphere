@@ -138,7 +138,6 @@ def main():
                         "events": ("organizer_id",),
                         "registrations": ("student_id",),
                         "notifications": ("user_id",),
-                        "attendance": ("student_id", "scanned_by"),
                         "od_letters": ("student_id",),
                     }.items():
                         for column in columns:

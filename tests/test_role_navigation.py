@@ -35,7 +35,6 @@ class RoleNavigationRegressionTestCase(unittest.TestCase):
         self.assertIn("allowedRoles.includes(role)", self.auth_client)
         self.assertIn('redirectToLogin("student")', (FRONTEND / "assets/js/event-pass.js").read_text(encoding="utf-8"))
         self.assertIn('redirectToLogin(["organizer", "admin"])', (FRONTEND / "organizer/events/manage.js").read_text(encoding="utf-8"))
-        self.assertIn("redirectToLogin(scannerRole())", (FRONTEND / "assets/js/attendance-scanner.js").read_text(encoding="utf-8"))
 
     def test_cross_role_dashboard_access_redirects_to_verified_role_home(self):
         self.assertIn("window.location.replace(roleHomePath(profileBody.profile.role))", self.dashboard)

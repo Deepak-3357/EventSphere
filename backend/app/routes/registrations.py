@@ -133,3 +133,15 @@ def get_registration(registration_id):
 def _owns_event(event_id):
     event = event_service.get_event(event_id)
     return bool(event and event["organizer"]["id"] == g.current_user["id"])
+
+
+@registrations_bp.get("/registrations/<registration_id>/pass")
+@require_auth
+@require_role("student")
+def event_pass(registration_id):
+    try:
+        return success(registration_service.get_event_pass(registration_id, g.current_user["id"]))
+    except RegistrationError as exc:
+        return _registration_error(exc)
+    except DatabaseError:
+        return _database_error()

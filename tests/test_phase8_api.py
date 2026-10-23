@@ -45,7 +45,6 @@ class Phase8ApiTestCase(unittest.TestCase):
         with get_connection() as connection:
             with connection.cursor() as cursor:
                 cursor.execute("delete from od_letters where event_id = %s", (self.event_id,))
-                cursor.execute("delete from attendance where event_id = %s", (self.event_id,))
                 cursor.execute("delete from registrations where event_id = %s", (self.event_id,))
                 cursor.execute("delete from events where id = %s", (self.event_id,))
 

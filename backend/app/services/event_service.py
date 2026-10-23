@@ -2,6 +2,7 @@
 
 import logging
 from datetime import date, datetime, time, timezone
+from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 # migration is unapplied, catalog queries use NULL stand-ins instead of the
 # missing columns so listings keep working. Start/end/unpublish still need
 # the real columns.
-_lifecycle_columns_present = None
+_lifecycle_columns_present: bool | None = None
 
 
 EVENT_STATUSES = {"draft", "pending", "published", "cancelled", "completed"}
@@ -204,9 +205,11 @@ def include_lifecycle_columns():
     from app import schema_contract
 
     report = schema_contract.schema_status()
-    if not report["available"]:
+    if not report.get("available"):
         return True
-    missing = set(report["missing"].get("columns") or [])
+    missing_data = report.get("missing")
+    missing_columns = missing_data.get("columns") if isinstance(missing_data, dict) else []
+    missing = set(missing_columns or [])
     _lifecycle_columns_present = "events.started_at" not in missing and "events.ended_at" not in missing
     if not _lifecycle_columns_present:
         logger.warning(
@@ -261,8 +264,8 @@ def _serialize(value):
     return value
 
 
-def serialize_event(row, columns):
-    event = {column: _serialize(value) for column, value in zip(columns, row)}
+def serialize_event(row, columns) -> dict[str, Any]:
+    event: dict[str, Any] = {column: _serialize(value) for column, value in zip(columns, row)}
     event["category"] = {"id": event.pop("category_id"), "name": event.pop("category_name")}
     event["venue"] = {
         "id": event.pop("venue_id"),
@@ -333,24 +336,25 @@ def list_events(filters, role=None, user_id=None):
     def _query():
         with get_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute(
+                count_query: Any = (
                     f"""select count(*) from events e
                         join categories c on c.id = e.category_id
-                        join venues v on v.id = e.venue_id{where}""",
-                    params,
+                        join venues v on v.id = e.venue_id{where}"""
                 )
-                total = cursor.fetchone()[0]
-                cursor.execute(
+                cursor.execute(count_query, params)
+                total_row = cursor.fetchone()
+                total = total_row[0] if total_row else 0
+                select_query: Any = (
                     f"""select {event_select_sql()}
                         from events e
                         join categories c on c.id = e.category_id
                         join venues v on v.id = e.venue_id
                         join profiles p on p.id = e.organizer_id{where}
                         order by e.event_date asc, e.start_time asc
-                        limit %s offset %s""",
-                    params + [limit, (page - 1) * limit],
+                        limit %s offset %s"""
                 )
-                columns = [description.name for description in cursor.description]
+                cursor.execute(select_query, params + [limit, (page - 1) * limit])
+                columns = [description.name for description in cursor.description] if cursor.description else []
                 return [serialize_event(row, columns) for row in cursor.fetchall()], total
 
     return _with_lifecycle_fallback(_query)
@@ -375,7 +379,8 @@ def is_student_registered(event_id, student_id):
                    where r.event_id = %s and r.status = 'registered' and tm.student_id = %s)""",
                 (event_id, student_id, event_id, student_id),
             )
-            return cursor.fetchone()[0]
+            row = cursor.fetchone()
+            return bool(row[0]) if row else False
 
 
 def create_event(payload, organizer_id):
@@ -385,10 +390,12 @@ def create_event(payload, organizer_id):
     with get_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute("select exists(select 1 from categories where id = %s)", (values["category_id"],))
-            if not cursor.fetchone()[0]:
+            cat_row = cursor.fetchone()
+            if not cat_row or not cat_row[0]:
                 raise LookupError("Category does not exist")
             cursor.execute("select exists(select 1 from venues where id = %s)", (values["venue_id"],))
-            if not cursor.fetchone()[0]:
+            venue_row = cursor.fetchone()
+            if not venue_row or not venue_row[0]:
                 raise LookupError("Venue does not exist")
             cursor.execute(
                 """insert into events (title, description, category_id, organizer_id, venue_id,
@@ -400,7 +407,10 @@ def create_event(payload, organizer_id):
                    %(eligibility)s, %(registration_instructions)s, %(facilities)s) returning id""",
                 {**values, "organizer_id": organizer_id, "facilities": Jsonb(values["facilities"])},
             )
-            event_id = cursor.fetchone()[0]
+            id_row = cursor.fetchone()
+            if not id_row:
+                raise RuntimeError("Failed to create event")
+            event_id = id_row[0]
             return _fetch_event(cursor, event_id)
 
 
@@ -516,7 +526,7 @@ def start_event(event_id, actor_id):
 
 
 def end_event(event_id, actor_id):
-    """Manually end a running event; closes attendance and persists the state."""
+    """Manually end a running event and persists the state in event_lifecycle_audit."""
 
     if not include_lifecycle_columns():
         raise SchemaNotReadyError()
@@ -546,7 +556,6 @@ def end_event(event_id, actor_id):
                     "operational_state": "ended",
                     "ended_at": ended_at.isoformat(),
                     "ended_by": str(ended_by) if ended_by else None,
-                    "attendance_closed": True,
                     "already_ended": True,
                 }
             ended_at = datetime.now(timezone.utc)
@@ -562,7 +571,6 @@ def end_event(event_id, actor_id):
                 "operational_state": "ended",
                 "ended_at": ended_at.isoformat(),
                 "ended_by": str(actor_id),
-                "attendance_closed": True,
                 "already_ended": False,
             }
 
@@ -599,7 +607,8 @@ def unpublish_event(event_id, actor_id):
             )
             _record_lifecycle_audit(cursor, event_id, "manual_unpublish", actor_id)
             event = _fetch_event(cursor, event_id)
-            event["was_published"] = True
+            if event:
+                event["was_published"] = True
             return event
 
 
@@ -631,7 +640,8 @@ def delete_event(event_id):
             if not current:
                 return None, False
             cursor.execute("select exists(select 1 from registrations where event_id=%s)", (event_id,))
-            has_registrations = cursor.fetchone()[0]
+            reg_row = cursor.fetchone()
+            has_registrations = bool(reg_row[0]) if reg_row else False
             if has_registrations or current["status"] in {"published", "completed"}:
                 active_ids = notification_service.active_registrant_ids(cursor, event_id)
                 cursor.execute("update events set status='cancelled', updated_at=now() where id=%s", (event_id,))
@@ -683,9 +693,14 @@ def create_faq(event_id, payload):
     with get_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute("insert into event_faqs(event_id, question, answer, position) values(%s,%s,%s,%s) returning id", (event_id, question.strip(), answer.strip(), position))
-            faq_id = cursor.fetchone()[0]
+            faq_id_row = cursor.fetchone()
+            if not faq_id_row:
+                raise RuntimeError("Failed to create FAQ")
+            faq_id = faq_id_row[0]
             cursor.execute("select id, event_id, question, answer, position from event_faqs where id=%s", (faq_id,))
             row = cursor.fetchone()
+            if not row:
+                raise LookupError("Created FAQ not found")
             return {"id": str(row[0]), "event_id": str(row[1]), "question": row[2], "answer": row[3], "position": row[4]}
 
 
@@ -708,7 +723,10 @@ def update_faq(faq_id, payload):
     params.append(faq_id)
     with get_connection() as connection:
         with connection.cursor() as cursor:
-            cursor.execute(f"update event_faqs set {', '.join(fields)}, updated_at=now() where id=%s returning id, event_id, question, answer, position", params)
+            update_query: Any = (
+                f"update event_faqs set {', '.join(fields)}, updated_at=now() where id=%s returning id, event_id, question, answer, position"
+            )
+            cursor.execute(update_query, params)
             row = cursor.fetchone()
             if not row:
                 return None

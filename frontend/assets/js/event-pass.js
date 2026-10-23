@@ -39,29 +39,23 @@ retryPass.addEventListener("click", () => window.location.reload());
     if (!response.ok) { logPassFailure(response.status); throw new Error(responseError(response.status)); }
     if (body.success !== true) throw new Error("The event pass response was invalid. Please try again.");
     const pass = body.data;
-    if (!pass || typeof pass !== "object" || !pass.event || !pass.student || !pass.attendance) {
+    if (!pass || typeof pass !== "object" || !pass.event || !pass.student) {
       throw new Error("The event pass data is incomplete. Please refresh and try again.");
-    }
-    if (typeof pass.qr_payload !== "string" || !pass.qr_payload.trim()) {
-      throw new Error("This event pass does not contain a valid signed QR payload.");
-    }
-    if (typeof pass.qr_image !== "string" || !pass.qr_image.startsWith("data:image/png;base64,")) {
-      throw new Error("The event pass QR code is unavailable. Please refresh and try again.");
     }
     document.querySelector("#eventTitle").textContent = pass.event.title;
     document.querySelector("#eventDetails").textContent = `${pass.event.event_date} · ${pass.event.start_time}–${pass.event.end_time} · ${pass.event.venue.name}, ${pass.event.venue.location}`;
     document.querySelector("#studentDetails").textContent = `${pass.student.name} · ${pass.student.department || ""} · Year ${pass.student.year || ""}`;
-    document.querySelector("#attendanceStatus").textContent = pass.attendance.status;
-    if (!/^\d{6}$/.test(pass.attendance_code || "")) throw new Error("This event pass does not contain a valid attendance code.");
-    document.querySelector("#attendanceCode").textContent = pass.attendance_code;
-    const qrCode = document.querySelector("#qrCode");
-    const qrReady = new Promise((resolve, reject) => {
-      qrCode.onload = resolve;
-      qrCode.onerror = () => reject(new Error("The event pass QR code could not be displayed."));
-    });
-    qrCode.src = pass.qr_image;
-    await qrReady;
-    passMessage.textContent = "Valid for this registration only.";
+    const participationType = document.querySelector("#participationType");
+    if (participationType) {
+      participationType.textContent = pass.participation_type === "team" ? "Team Registration" : "Individual Registration";
+    }
+    const teamDetails = document.querySelector("#teamDetails");
+    if (teamDetails && pass.team && pass.team.name) {
+      teamDetails.classList.remove("d-none");
+      const memberNames = (pass.team.members || []).map(m => m.full_name).join(", ");
+      teamDetails.textContent = `Team: ${pass.team.name}${memberNames ? ` (${memberNames})` : ""}`;
+    }
+    passMessage.textContent = "Valid registration for this event.";
     passCard.classList.remove("d-none");
   } catch (error) {
     if (error instanceof TypeError) {

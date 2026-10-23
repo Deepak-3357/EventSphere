@@ -102,7 +102,7 @@ def _load_profile(user_id):
                 (user_id,),
             )
             row = cursor.fetchone()
-            if row is None:
+            if row is None or not cursor.description:
                 return None
             columns = [description.name for description in cursor.description]
             profile = dict(zip(columns, row))

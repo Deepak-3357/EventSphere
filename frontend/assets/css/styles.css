@@ -11,10 +11,6 @@ body {
 .btn:hover { transform: translateY(-1px); }
 .btn:active { transform: translateY(0); }
 .feature-card:hover { box-shadow: 0 .75rem 1.5rem rgba(27, 39, 94, .08); transform: translateY(-2px); }
-.scanner-message { border-radius: .65rem; padding: .65rem .8rem; min-height: 2.4rem; transition: background-color .2s ease, color .2s ease; }
-.scanner-message[data-state="pending"] { background: #fff8e1; color: #805b00 !important; }
-.scanner-message[data-state="success"] { background: #eaf8ef; }
-.scanner-message[data-state="error"] { background: #fff0f1; }
 @keyframes eventsphere-page-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
 .hero {

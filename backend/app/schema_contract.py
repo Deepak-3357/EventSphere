@@ -29,9 +29,6 @@ REQUIRED_TABLES = (
     "events",
     "registrations",
     "notifications",
-    "attendance",
-    "attendance_codes",
-    "attendance_code_attempts",
     "event_faqs",
     "event_lifecycle_audit",
     "od_letters",
@@ -39,7 +36,7 @@ REQUIRED_TABLES = (
     "team_members",
 )
 
-# Columns on ``public.events`` referenced by the event, attendance, dashboard,
+# Columns on ``public.events`` referenced by the event, dashboard,
 # registration, and OD-letter services. ``started_at``/``ended_at`` are part of
 # the shared event SELECT, so the catalog cannot load for any role until the
 # manual lifecycle migration is applied; ``started_by``/``ended_by`` are

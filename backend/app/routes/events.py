@@ -118,7 +118,7 @@ def get_event(event_id):
         is_owner = identity and event["organizer"]["id"] == identity["id"]
         if event["status"] != "published" and role != "admin" and not (role == "organizer" and is_owner):
             return error("NOT_FOUND", "Event not found", 404)
-        if role == "student":
+        if identity and role == "student":
             event["is_registered"] = event_service.is_student_registered(event_id, identity["id"])
         return success(event)
     except ValueError as exc:
