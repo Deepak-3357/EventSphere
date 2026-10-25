@@ -7,32 +7,30 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
     <link rel="stylesheet" href="../assets/css/styles.css" />
   </head>
-  <body class="bg-light">
-    <main class="container py-5">
-      <div class="row justify-content-center">
-        <div class="col-md-7 col-lg-5">
-          <a class="text-decoration-none fw-bold text-primary" href="../">← EventSphere</a>
-          <div class="card border-0 shadow-sm mt-4">
-            <div class="card-body p-4 p-lg-5">
-              <h1 class="h3">Welcome back</h1>
-              <p class="text-secondary">Sign in to continue to EventSphere.</p>
+  <body class="auth-page">
+    <aside class="auth-page__brand"><a class="brand-mark" href="../" aria-label="EventSphere home"><span class="brand-mark__icon" aria-hidden="true">✦</span><span>Event<span>Sphere</span></span></a><div><p class="eyebrow">Your campus. Your community.</p><h1>Make room for<br /><em>what matters.</em></h1><p>Discover experiences, find your people, and make every semester count.</p></div><p class="auth-page__meta">Secure access powered by EventSphere</p></aside>
+    <main class="auth-page__form">
+      <div class="auth-card">
+        <a class="text-decoration-none fw-bold text-primary" href="../">← Back to EventSphere</a>
+        <div class="mt-4">
+              <h1>Welcome back</h1>
+              <p class="auth-card__intro">Sign in to continue to your campus experience.</p>
               <form id="loginForm" novalidate>
                 <label class="form-label" for="email">Email</label>
                 <input class="form-control mb-3" id="email" type="email" autocomplete="email" required />
                 <label class="form-label" for="password">Password</label>
-                <input class="form-control mb-3" id="password" type="password" autocomplete="current-password" required />
+                <div class="password-field mb-3"><input class="form-control" id="password" type="password" autocomplete="current-password" required /><button class="password-toggle" type="button" data-password-target="password" aria-label="Show password">Show</button></div>
                 <div id="loginMessage" class="small mb-3" role="alert"></div>
                 <button class="btn btn-primary w-100" id="loginButton" type="submit">Sign in</button>
               </form>
               <p class="small text-secondary mt-4 mb-0">New to EventSphere? <a href="../register/">Create a student account</a>.</p>
-            </div>
-          </div>
         </div>
       </div>
     </main>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="../assets/js/auth-client.js"></script>
     <script>
+      document.querySelectorAll("[data-password-target]").forEach((toggle) => toggle.addEventListener("click", () => { const input = document.querySelector(`#${toggle.dataset.passwordTarget}`); const visible = input.type === "text"; input.type = visible ? "password" : "text"; toggle.textContent = visible ? "Show" : "Hide"; toggle.setAttribute("aria-label", visible ? "Show password" : "Hide password"); }));
       document.querySelector("#loginForm").addEventListener("submit", async (event) => {
         event.preventDefault();
         const message = document.querySelector("#loginMessage");

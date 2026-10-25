@@ -95,7 +95,10 @@ def list_events():
         filters = _filters(identity)
         role = identity["profile"]["role"] if identity else None
         events, total = event_service.list_events(filters, role, identity["id"] if identity else None)
-        return success(events, pagination={"page": filters["page"], "limit": filters["limit"], "total": total})
+        response, status = success(events, pagination={"page": filters["page"], "limit": filters["limit"], "total": total})
+        if identity is None and filters["status"] in {None, "published"}:
+            response.headers["Cache-Control"] = "public, max-age=15, stale-while-revalidate=30"
+        return response, status
     except PermissionError as exc:
         return error("FORBIDDEN", str(exc), 403)
     except ValueError as exc:

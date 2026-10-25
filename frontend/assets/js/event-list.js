@@ -5,7 +5,7 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>'"]/g, (character) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"}[character]));
 }
 
-fetch(apiUrl("/api/events?limit=100"))
+fetch(apiUrl("/api/events?status=published&limit=24"))
   .then((response) => response.json().then((body) => ({ response, body })))
   .then(({ response, body }) => {
     if (!response.ok) throw new Error(body.error?.message || "Events could not be loaded.");

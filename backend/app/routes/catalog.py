@@ -13,7 +13,9 @@ catalog_bp = Blueprint("catalog", __name__)
 @catalog_bp.get("/categories")
 def categories():
     try:
-        return success(event_service.list_categories())
+        response, status = success(event_service.list_categories())
+        response.headers["Cache-Control"] = "public, max-age=30, stale-while-revalidate=60"
+        return response, status
     except DatabaseError:
         return error("DATABASE_ERROR", "The category request could not be completed.", 500)
 
