@@ -3,7 +3,7 @@
 from flask import Blueprint
 from psycopg import DatabaseError
 
-from app.services import event_service
+from app.services import event_service, venue_service
 from app.utils.responses import error, success
 
 
@@ -23,6 +23,6 @@ def categories():
 @catalog_bp.get("/venues")
 def venues():
     try:
-        return success(event_service.list_venues())
+        return success(venue_service.list_venues())
     except DatabaseError:
         return error("DATABASE_ERROR", "The venue request could not be completed.", 500)

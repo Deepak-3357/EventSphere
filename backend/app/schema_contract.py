@@ -34,6 +34,7 @@ REQUIRED_TABLES = (
     "od_letters",
     "teams",
     "team_members",
+    "venue_bookings",
 )
 
 # Columns on ``public.events`` referenced by the event, dashboard,
@@ -46,6 +47,14 @@ REQUIRED_TABLES = (
 # services and fails if a query starts using a column that is not declared
 # here, so the contract cannot silently fall behind the code.
 REQUIRED_COLUMNS = {
+    "venues": (
+        "id",
+        "name",
+        "location",
+        "capacity",
+        "created_at",
+        "is_active",
+    ),
     "events": (
         "id",
         "title",
@@ -72,6 +81,18 @@ REQUIRED_COLUMNS = {
         "started_by",
         "ended_at",
         "ended_by",
+    ),
+    "venue_bookings": (
+        "id",
+        "venue_id",
+        "requester_id",
+        "event_id",
+        "title",
+        "start_at",
+        "end_at",
+        "status",
+        "created_at",
+        "updated_at",
     ),
 }
 

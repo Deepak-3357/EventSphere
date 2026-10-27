@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from uuid import UUID
 
 from app.db import get_connection
-from app.services import notification_service
+from app.services import notification_service, venue_service
 from psycopg.errors import UndefinedColumn
 from psycopg.types.json import Jsonb
 
@@ -397,6 +397,12 @@ def create_event(payload, organizer_id):
             venue_row = cursor.fetchone()
             if not venue_row or not venue_row[0]:
                 raise LookupError("Venue does not exist")
+            venue_service.ensure_event_slot_available(
+                cursor,
+                values["venue_id"],
+                datetime.combine(values["event_date"], values["start_time"], tzinfo=venue_service.CAMPUS_TIMEZONE),
+                datetime.combine(values["event_date"], values["end_time"], tzinfo=venue_service.CAMPUS_TIMEZONE),
+            )
             cursor.execute(
                 """insert into events (title, description, category_id, organizer_id, venue_id,
                    event_date, start_time, end_time, capacity, registration_deadline, status, image_url,
@@ -447,6 +453,13 @@ def update_event(event_id, payload):
                 if values[field] != source.get(field)
             }
             active_ids = notification_service.active_registrant_ids(cursor, event_id) if current["status"] == "published" else []
+            venue_service.ensure_event_slot_available(
+                cursor,
+                values["venue_id"],
+                datetime.combine(values["event_date"], values["start_time"], tzinfo=venue_service.CAMPUS_TIMEZONE),
+                datetime.combine(values["event_date"], values["end_time"], tzinfo=venue_service.CAMPUS_TIMEZONE),
+                event_id,
+            )
             values["event_id"] = event_id
             values["facilities"] = Jsonb(values["facilities"])
             cursor.execute(

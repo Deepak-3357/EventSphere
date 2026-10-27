@@ -1,12 +1,12 @@
 const dashboardMessage = document.querySelector("#dashboardMessage");
 const role = window.location.pathname.includes("/student/") ? "student" : window.location.pathname.includes("/organizer/") ? "organizer" : "admin";
-if (role === "organizer") {
+if (role === "organizer" || role === "admin") {
   const nav = document.querySelector(".dashboard-sidebar .nav");
   if (nav) {
     const link = document.createElement("a");
     link.className = "nav-link";
-    link.href = "../../organizer/events/";
-    link.textContent = "Manage Events";
+    link.href = "../../venues/";
+    link.textContent = "Venue Management";
     nav.insertBefore(link, nav.children[1] || null);
   }
 }
