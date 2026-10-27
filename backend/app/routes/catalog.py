@@ -1,6 +1,6 @@
 """Public category and venue lookup endpoints."""
 
-from flask import Blueprint
+from flask import Blueprint, current_app
 from psycopg import DatabaseError
 
 from app.services import event_service, venue_service
@@ -17,6 +17,7 @@ def categories():
         response.headers["Cache-Control"] = "public, max-age=30, stale-while-revalidate=60"
         return response, status
     except DatabaseError:
+        current_app.logger.exception("Public category lookup failed")
         return error("DATABASE_ERROR", "The category request could not be completed.", 500)
 
 
@@ -25,4 +26,5 @@ def venues():
     try:
         return success(venue_service.list_venues())
     except DatabaseError:
+        current_app.logger.exception("Public venue lookup failed")
         return error("DATABASE_ERROR", "The venue request could not be completed.", 500)
