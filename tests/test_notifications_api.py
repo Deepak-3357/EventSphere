@@ -37,7 +37,7 @@ class NotificationApiTestCase(unittest.TestCase):
             with connection.cursor() as cursor:
                 cursor.execute(
                     """insert into events
-                       (id, title, description, category_id, organizer_id, venue_id,
+                       (id, title, description, category_id, organizer_id,
                         event_date, start_time, end_time, capacity, registration_deadline, status)
                        values (%s, %s, %s, %s, %s, %s, '2099-12-20', '10:00', '12:00', 10,
                                '2099-12-19 18:00:00+05:30', 'published')""",
@@ -47,7 +47,6 @@ class NotificationApiTestCase(unittest.TestCase):
                         "Notification workflow test event",
                         "10000000-0000-0000-0000-000000000001",
                         ORGANIZER["id"],
-                        "20000000-0000-0000-0000-000000000004",
                     ),
                 )
 

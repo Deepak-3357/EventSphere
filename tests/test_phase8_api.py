@@ -35,10 +35,10 @@ class Phase8ApiTestCase(unittest.TestCase):
         self.event_id, self.registration_id = str(uuid.uuid4()), str(uuid.uuid4())
         with get_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute("""insert into events (id, title, description, category_id, organizer_id, venue_id,
+                cursor.execute("""insert into events (id, title, description, category_id, organizer_id,
                     event_date, start_time, end_time, capacity, registration_deadline, status)
                     values (%s, 'Phase 8 OD Event', 'Test', %s, %s, %s, '2099-11-20', '10:00', '12:00', 20,
-                    '2099-11-19 10:00:00+05:30', 'published')""", (self.event_id, "10000000-0000-0000-0000-000000000001", ORGANIZER["id"], "20000000-0000-0000-0000-000000000004"))
+                    '2099-11-19 10:00:00+05:30', 'published')""", (self.event_id, "10000000-0000-0000-0000-000000000001", ORGANIZER["id"]))
                 cursor.execute("insert into registrations (id, event_id, student_id) values (%s, %s, %s)", (self.registration_id, self.event_id, STUDENT_ONE["id"]))
 
     def tearDown(self):
@@ -70,10 +70,10 @@ class Phase8ApiTestCase(unittest.TestCase):
         other_event_id = str(uuid.uuid4())
         with get_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute("""insert into events (id, title, description, category_id, organizer_id, venue_id,
+                cursor.execute("""insert into events (id, title, description, category_id, organizer_id,
                     event_date, start_time, end_time, capacity, registration_deadline, status)
                     values (%s, 'Other organizer event', 'Test', %s, %s, %s, '2099-11-21', '10:00', '12:00', 20,
-                    '2099-11-20 10:00:00+05:30', 'published')""", (other_event_id, "10000000-0000-0000-0000-000000000001", OTHER["id"], "20000000-0000-0000-0000-000000000004"))
+                    '2099-11-20 10:00:00+05:30', 'published')""", (other_event_id, "10000000-0000-0000-0000-000000000001", OTHER["id"]))
         with self.auth(ORGANIZER, "organizer"):
             response = self.client.get("/api/dashboard/organizer", headers=self.headers())
         data = response.get_json()["data"]

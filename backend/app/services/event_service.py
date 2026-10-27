@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from uuid import UUID
 
 from app.db import get_connection
-from app.services import notification_service, venue_service
+from app.services import notification_service
 from psycopg.errors import UndefinedColumn
 from psycopg.types.json import Jsonb
 
@@ -101,7 +101,7 @@ def validate_event_payload(payload, current=None, requested_status=None):
 
     merged = dict(current or {})
     merged.update({key: value for key, value in payload.items() if key != "organizer_id"})
-    required = ("title", "category_id", "venue_id", "event_date", "start_time", "end_time", "capacity", "registration_deadline")
+    required = ("title", "category_id", "event_date", "start_time", "end_time", "capacity", "registration_deadline")
     missing = [field for field in required if merged.get(field) in (None, "")]
     if missing:
         raise ValueError(f"Missing required field: {missing[0]}")
@@ -115,7 +115,6 @@ def validate_event_payload(payload, current=None, requested_status=None):
         raise ValueError("description must be at most 5000 characters")
 
     category_id = parse_uuid(merged["category_id"], "category_id")
-    venue_id = parse_uuid(merged["venue_id"], "venue_id")
     event_date = parse_date(merged["event_date"])
     start_time = parse_time(merged["start_time"], "start_time")
     end_time = parse_time(merged["end_time"], "end_time")
@@ -155,7 +154,6 @@ def validate_event_payload(payload, current=None, requested_status=None):
         "title": title.strip(),
         "description": description.strip(),
         "category_id": category_id,
-        "venue_id": venue_id,
         "event_date": event_date,
         "start_time": start_time,
         "end_time": end_time,
@@ -229,7 +227,7 @@ def lifecycle_timestamp_sql(alias="e"):
 
 def event_select_sql():
     return f"""
-    e.id, e.title, e.description, e.category_id, e.organizer_id, e.venue_id,
+    e.id, e.title, e.description, e.category_id, e.organizer_id,
     e.event_date, e.start_time, e.end_time, e.capacity,
     e.registration_deadline, e.status, e.image_url, e.participation_mode,
     e.min_team_size, e.max_team_size, e.eligibility, e.registration_instructions,
@@ -238,7 +236,6 @@ def event_select_sql():
     (select count(*) from registrations r where r.event_id = e.id and r.status = 'registered')::int as registered_count,
     (e.capacity - (select count(*) from registrations r where r.event_id = e.id and r.status = 'registered'))::int as available_seats,
     c.name as category_name,
-    v.name as venue_name, v.location as venue_location, v.capacity as venue_capacity,
     p.full_name as organizer_name
 """
 
@@ -267,12 +264,6 @@ def _serialize(value):
 def serialize_event(row, columns) -> dict[str, Any]:
     event: dict[str, Any] = {column: _serialize(value) for column, value in zip(columns, row)}
     event["category"] = {"id": event.pop("category_id"), "name": event.pop("category_name")}
-    event["venue"] = {
-        "id": event.pop("venue_id"),
-        "name": event.pop("venue_name"),
-        "location": event.pop("venue_location"),
-        "capacity": event.pop("venue_capacity"),
-    }
     event["organizer"] = {"id": event.pop("organizer_id"), "name": event.pop("organizer_name")}
     started_at, ended_at = event.pop("started_at", None), event.pop("ended_at", None)
     if event["status"] == "published":
@@ -287,7 +278,6 @@ def _fetch_event(cursor, event_id):
         f"""select {event_select_sql()}
             from events e
             join categories c on c.id = e.category_id
-            join venues v on v.id = e.venue_id
             join profiles p on p.id = e.organizer_id
             where e.id = %s""",
         (event_id,),
@@ -324,9 +314,6 @@ def list_events(filters, role=None, user_id=None):
     if filters.get("category"):
         conditions.append("c.name ilike %s")
         params.append(filters["category"])
-    if filters.get("venue"):
-        conditions.append("v.name ilike %s")
-        params.append(filters["venue"])
     if filters.get("date"):
         conditions.append("e.event_date = %s")
         params.append(filters["date"])
@@ -339,7 +326,7 @@ def list_events(filters, role=None, user_id=None):
                 count_query: Any = (
                     f"""select count(*) from events e
                         join categories c on c.id = e.category_id
-                        join venues v on v.id = e.venue_id{where}"""
+                        {where}"""
                 )
                 cursor.execute(count_query, params)
                 total_row = cursor.fetchone()
@@ -348,7 +335,6 @@ def list_events(filters, role=None, user_id=None):
                     f"""select {event_select_sql()}
                         from events e
                         join categories c on c.id = e.category_id
-                        join venues v on v.id = e.venue_id
                         join profiles p on p.id = e.organizer_id{where}
                         order by e.event_date asc, e.start_time asc
                         limit %s offset %s"""
@@ -393,21 +379,11 @@ def create_event(payload, organizer_id):
             cat_row = cursor.fetchone()
             if not cat_row or not cat_row[0]:
                 raise LookupError("Category does not exist")
-            cursor.execute("select exists(select 1 from venues where id = %s)", (values["venue_id"],))
-            venue_row = cursor.fetchone()
-            if not venue_row or not venue_row[0]:
-                raise LookupError("Venue does not exist")
-            venue_service.ensure_event_slot_available(
-                cursor,
-                values["venue_id"],
-                datetime.combine(values["event_date"], values["start_time"], tzinfo=venue_service.CAMPUS_TIMEZONE),
-                datetime.combine(values["event_date"], values["end_time"], tzinfo=venue_service.CAMPUS_TIMEZONE),
-            )
             cursor.execute(
-                """insert into events (title, description, category_id, organizer_id, venue_id,
+                """insert into events (title, description, category_id, organizer_id,
                    event_date, start_time, end_time, capacity, registration_deadline, status, image_url,
                    participation_mode, min_team_size, max_team_size, eligibility, registration_instructions, facilities)
-                   values (%(title)s, %(description)s, %(category_id)s, %(organizer_id)s, %(venue_id)s,
+                   values (%(title)s, %(description)s, %(category_id)s, %(organizer_id)s,
                    %(event_date)s, %(start_time)s, %(end_time)s, %(capacity)s, %(registration_deadline)s,
                    %(status)s, %(image_url)s, %(participation_mode)s, %(min_team_size)s, %(max_team_size)s,
                    %(eligibility)s, %(registration_instructions)s, %(facilities)s) returning id""",
@@ -428,7 +404,6 @@ def update_event(event_id, payload):
                 return None
             source = dict(current)
             source["category_id"] = current["category"]["id"]
-            source["venue_id"] = current["venue"]["id"]
             source["image_url"] = current["image_url"]
             source["participation_mode"] = current["participation_mode"]
             source["min_team_size"] = current["min_team_size"]
@@ -449,22 +424,15 @@ def update_event(event_id, payload):
                 raise ValueError(f"Cannot transition event from {current['status']} to {values['status']}")
             changed_fields = {
                 field
-                for field in ("title", "description", "category_id", "venue_id", "event_date", "start_time", "end_time", "capacity", "registration_deadline", "image_url", "participation_mode", "min_team_size", "max_team_size", "eligibility", "registration_instructions", "facilities")
+                for field in ("title", "description", "category_id", "event_date", "start_time", "end_time", "capacity", "registration_deadline", "image_url", "participation_mode", "min_team_size", "max_team_size", "eligibility", "registration_instructions", "facilities")
                 if values[field] != source.get(field)
             }
             active_ids = notification_service.active_registrant_ids(cursor, event_id) if current["status"] == "published" else []
-            venue_service.ensure_event_slot_available(
-                cursor,
-                values["venue_id"],
-                datetime.combine(values["event_date"], values["start_time"], tzinfo=venue_service.CAMPUS_TIMEZONE),
-                datetime.combine(values["event_date"], values["end_time"], tzinfo=venue_service.CAMPUS_TIMEZONE),
-                event_id,
-            )
             values["event_id"] = event_id
             values["facilities"] = Jsonb(values["facilities"])
             cursor.execute(
                 """update events set title=%(title)s, description=%(description)s, category_id=%(category_id)s,
-                   venue_id=%(venue_id)s, event_date=%(event_date)s, start_time=%(start_time)s,
+                   event_date=%(event_date)s, start_time=%(start_time)s,
                    end_time=%(end_time)s, capacity=%(capacity)s, registration_deadline=%(registration_deadline)s,
                    status=%(status)s, image_url=%(image_url)s, participation_mode=%(participation_mode)s,
                    min_team_size=%(min_team_size)s, max_team_size=%(max_team_size)s,
@@ -676,13 +644,6 @@ def list_categories():
         with connection.cursor() as cursor:
             cursor.execute("select id, name, description from categories order by name")
             return [{"id": str(row[0]), "name": row[1], "description": row[2]} for row in cursor.fetchall()]
-
-
-def list_venues():
-    with get_connection() as connection:
-        with connection.cursor() as cursor:
-            cursor.execute("select id, name, location, capacity from venues order by name")
-            return [{"id": str(row[0]), "name": row[1], "location": row[2], "capacity": row[3]} for row in cursor.fetchall()]
 
 
 def list_faqs(event_id):

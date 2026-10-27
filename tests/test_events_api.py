@@ -51,13 +51,11 @@ class EventApiTestCase(unittest.TestCase):
     def test_public_catalog_and_published_event_listing(self):
         events = self.client.get("/api/events?limit=100")
         categories = self.client.get("/api/categories")
-        venues = self.client.get("/api/venues")
 
         self.assertEqual(events.status_code, 200)
         self.assertTrue(events.get_json()["success"])
         self.assertTrue(all(item["status"] == "published" for item in events.get_json()["data"]))
         self.assertEqual(categories.status_code, 200)
-        self.assertEqual(venues.status_code, 200)
 
     def test_public_xml_catalog_is_valid_and_published_only(self):
         response = self.client.get("/api/events/export.xml")
@@ -73,7 +71,6 @@ class EventApiTestCase(unittest.TestCase):
             "title": title,
             "description": "An event created by the Phase 4 API test.",
             "category_id": "10000000-0000-0000-0000-000000000001",
-            "venue_id": "20000000-0000-0000-0000-000000000004",
             "event_date": "2099-12-01",
             "start_time": "14:00",
             "end_time": "16:00",
@@ -125,7 +122,6 @@ class EventApiTestCase(unittest.TestCase):
                         "title": f"Ownership Test {uuid.uuid4()}",
                         "description": "Ownership test event",
                         "category_id": "10000000-0000-0000-0000-000000000001",
-                        "venue_id": "20000000-0000-0000-0000-000000000004",
                         "event_date": "2099-12-02",
                         "start_time": "10:00",
                         "end_time": "11:00",
@@ -159,7 +155,6 @@ class EventApiTestCase(unittest.TestCase):
                     json={
                         "title": "Invalid event",
                         "category_id": "10000000-0000-0000-0000-000000000001",
-                        "venue_id": "20000000-0000-0000-0000-000000000004",
                         "event_date": "2099-12-02",
                         "start_time": "12:00",
                         "end_time": "11:00",
@@ -182,7 +177,6 @@ class EventApiTestCase(unittest.TestCase):
                         "title": f"Admin Test {uuid.uuid4()}",
                         "description": "Admin-managed event",
                         "category_id": "10000000-0000-0000-0000-000000000001",
-                        "venue_id": "20000000-0000-0000-0000-000000000004",
                         "event_date": "2099-12-03",
                         "start_time": "10:00",
                         "end_time": "11:00",
@@ -223,7 +217,6 @@ class EventApiTestCase(unittest.TestCase):
             "title": f"FAQ Test {uuid.uuid4()}",
             "description": "Keep this description",
             "category_id": "10000000-0000-0000-0000-000000000001",
-            "venue_id": "20000000-0000-0000-0000-000000000004",
             "event_date": "2099-12-04",
             "start_time": "10:00",
             "end_time": "11:00",

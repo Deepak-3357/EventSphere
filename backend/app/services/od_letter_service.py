@@ -70,11 +70,11 @@ def _letter_data(cursor, letter_id):
         """select l.id, l.registration_id, l.student_id, l.event_id, l.letter_number,
                   l.issued_at, l.status, p.full_name, p.email, p.department, p.year,
                   e.title, e.event_date, e.start_time, e.end_time, e.status,
-                  v.name, v.location, op.full_name, t.name,
+                  op.full_name, t.name,
                   coalesce((select jsonb_agg(jsonb_build_object('full_name', tm.full_name, 'email', tm.email) order by tm.position)
                             from team_members tm where tm.team_id = (select r.team_id from registrations r where r.id = l.registration_id)), '[]'::jsonb)
            from od_letters l join profiles p on p.id = l.student_id
-           join events e on e.id = l.event_id join venues v on v.id = e.venue_id
+           join events e on e.id = l.event_id
            join profiles op on op.id = e.organizer_id
            left join teams t on t.id = (select r.team_id from registrations r where r.id = l.registration_id)
            where l.id = %s""", (letter_id,))
@@ -85,9 +85,9 @@ def _letter_data(cursor, letter_id):
     return {"id": values[0], "registration_id": values[1], "student_id": values[2], "event_id": values[3],
             "letter_number": values[4], "issued_at": values[5], "status": values[6],
             "student": {"name": values[7], "email": values[8], "department": values[9], "year": values[10]},
-            "event": {"title": values[11], "event_date": values[12], "start_time": values[13], "end_time": values[14],
-                      "status": values[15], "venue": {"name": values[16], "location": values[17]}, "organizer": values[18]},
-            "team": {"name": values[19], "members": values[20] or []} if values[19] else None,
+             "event": {"title": values[11], "event_date": values[12], "start_time": values[13], "end_time": values[14],
+                       "status": values[15], "organizer": values[16]},
+             "team": {"name": values[17], "members": values[18] or []} if values[17] else None,
             "verification_token": _token(values[0])}
 
 
@@ -202,7 +202,6 @@ def generate_pdf(letter):
 
     student = letter.get("student") or {}
     event = letter.get("event") or {}
-    venue = event.get("venue") or {}
     issued = value(letter, "issued_at")[:10]
     event_date = value(event, "event_date")
     event_time = f"{value(event, 'start_time')} – {value(event, 'end_time')}"
@@ -229,7 +228,6 @@ def generate_pdf(letter):
     y -= 22
     y = draw_field("Event", value(event, "title"), margin, y, width - (margin * 2))
     y = draw_field("Date and time", f"{event_date} · {event_time}", margin, y, width - (margin * 2))
-    y = draw_field("Venue", f"{value(venue, 'name')}, {value(venue, 'location')}", margin, y, width - (margin * 2))
     y = draw_field("Organizer", value(event, "organizer"), margin, y, width - (margin * 2))
     if letter.get("team"):
         team = letter["team"]

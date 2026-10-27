@@ -1,9 +1,9 @@
-"""Public category and venue lookup endpoints."""
+"""Public category lookup endpoints."""
 
 from flask import Blueprint, current_app
 from psycopg import DatabaseError
 
-from app.services import event_service, venue_service
+from app.services import event_service
 from app.utils.responses import error, success
 
 
@@ -19,12 +19,3 @@ def categories():
     except DatabaseError:
         current_app.logger.exception("Public category lookup failed")
         return error("DATABASE_ERROR", "The category request could not be completed.", 500)
-
-
-@catalog_bp.get("/venues")
-def venues():
-    try:
-        return success(venue_service.list_venues())
-    except DatabaseError:
-        current_app.logger.exception("Public venue lookup failed")
-        return error("DATABASE_ERROR", "The venue request could not be completed.", 500)

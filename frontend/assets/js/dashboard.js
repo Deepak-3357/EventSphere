@@ -1,15 +1,5 @@
 const dashboardMessage = document.querySelector("#dashboardMessage");
 const role = window.location.pathname.includes("/student/") ? "student" : window.location.pathname.includes("/organizer/") ? "organizer" : "admin";
-if (role === "organizer" || role === "admin") {
-  const nav = document.querySelector(".dashboard-sidebar .nav");
-  if (nav) {
-    const link = document.createElement("a");
-    link.className = "nav-link";
-    link.href = "../../venues/";
-    link.textContent = "Venue Management";
-    nav.insertBefore(link, nav.children[1] || null);
-  }
-}
 const apiBase = `${eventSphereApiBase}/api`;
 function text(id, value) { const node = document.querySelector(`#${id}`); if (node) node.textContent = value ?? "—"; }
 function badge(value) { const node = document.createElement("span"); node.className = "badge text-bg-secondary"; node.textContent = value || "—"; return node; }
@@ -18,7 +8,7 @@ function renderStudent(data) {
   text("statUpcoming", data.stats.upcoming_events); text("statRegistrations", data.stats.registrations); text("statNotifications", data.stats.unread_notifications);
   const events = document.querySelector("#upcomingEvents"); events.replaceChildren();
   if (!data.upcoming_events.length) listMessage(events, "No upcoming registered events.");
-  data.upcoming_events.forEach((event) => { const li = document.createElement("li"); li.className = "list-group-item d-flex justify-content-between align-items-center gap-2"; const label = document.createElement("span"); label.textContent = `${event.title} · ${event.event_date} · ${event.venue_name}`; li.append(label, badge(event.registration_status)); events.append(li); });
+  data.upcoming_events.forEach((event) => { const li = document.createElement("li"); li.className = "list-group-item d-flex justify-content-between align-items-center gap-2"; const label = document.createElement("span"); label.textContent = `${event.title} · ${event.event_date}`; li.append(label, badge(event.registration_status)); events.append(li); });
   const notifications = document.querySelector("#recentNotifications"); notifications.replaceChildren();
   if (!data.recent_notifications.length) listMessage(notifications, "No recent notifications.");
   data.recent_notifications.forEach((item) => { const li = document.createElement("li"); li.className = "list-group-item"; li.textContent = `${item.title}: ${item.message}`; notifications.append(li); });

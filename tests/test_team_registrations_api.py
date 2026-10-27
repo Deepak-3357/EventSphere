@@ -36,9 +36,9 @@ class TeamRegistrationApiTestCase(unittest.TestCase):
         with get_connection() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    """insert into events(id,title,description,category_id,organizer_id,venue_id,event_date,start_time,end_time,capacity,registration_deadline,status,participation_mode,min_team_size,max_team_size)
-                       values(%s,%s,'team test',%s,%s,%s,current_date + 30,'10:00','12:00',3,%s,'published','both',2,3)""",
-                    (self.event_id, f"Team test {self.event_id}", "10000000-0000-0000-0000-000000000001", ORGANIZER["id"], "20000000-0000-0000-0000-000000000004", deadline),
+                    """insert into events(id,title,description,category_id,organizer_id,event_date,start_time,end_time,capacity,registration_deadline,status,participation_mode,min_team_size,max_team_size)
+                       values(%s,%s,'team test',%s,%s,current_date + 30,'10:00','12:00',3,%s,'published','both',2,3)""",
+                    (self.event_id, f"Team test {self.event_id}", "10000000-0000-0000-0000-000000000001", ORGANIZER["id"], deadline),
                 )
 
     def tearDown(self):

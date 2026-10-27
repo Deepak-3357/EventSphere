@@ -117,8 +117,7 @@ body {
 .event-card h3 { margin: .7rem 0 .45rem; font-size: 1.15rem; letter-spacing: -.03em; }
 .event-card h3 a { color: #17213f; text-decoration: none; }
 .event-card h3 a:hover { color: #5068d7; }
-.event-card__venue, .event-card__description { color: #6c7590; font-size: .82rem; line-height: 1.55; }
-.event-card__venue { margin-bottom: .45rem; }
+.event-card__description { color: #6c7590; font-size: .82rem; line-height: 1.55; }
 .event-card__description { display: -webkit-box; overflow: hidden; min-height: 2.5rem; margin-bottom: 1.1rem; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .event-card__footer { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding-top: .9rem; border-top: 1px solid #edf0f7; }
 .availability { color: #59627b; font-size: .72rem; }

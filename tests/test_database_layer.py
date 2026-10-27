@@ -25,7 +25,7 @@ class DatabaseIntegrationTestCase(unittest.TestCase):
     def test_database_tables_and_seed_data(self):
         with self.get_connection() as connection:
             with connection.cursor() as cursor:
-                for table in ("profiles", "categories", "venues", "events", "registrations", "notifications"):
+                for table in ("profiles", "categories", "events", "registrations", "notifications"):
                     cursor.execute("select to_regclass(%s)", (f"public.{table}",))
                     self.assertEqual(cursor.fetchone()[0], table)
 

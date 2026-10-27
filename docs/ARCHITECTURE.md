@@ -17,7 +17,6 @@ Flask Backend
 Supabase PostgreSQL
   ├── profiles
   ├── categories
-  ├── venues
   ├── events
   ├── registrations
   └── notifications

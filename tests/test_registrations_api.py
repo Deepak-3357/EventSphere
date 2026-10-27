@@ -38,7 +38,7 @@ class RegistrationApiTestCase(unittest.TestCase):
             with connection.cursor() as cursor:
                 cursor.execute(
                     """insert into events
-                       (id, title, description, category_id, organizer_id, venue_id,
+                       (id, title, description, category_id, organizer_id,
                         event_date, start_time, end_time, capacity, registration_deadline, status)
                        values (%s, %s, %s, %s, %s, %s, '2099-12-10', '10:00', '12:00', 1,
                                '2099-12-09 18:00:00+05:30', 'published')""",
@@ -48,7 +48,6 @@ class RegistrationApiTestCase(unittest.TestCase):
                         "Registration workflow test event",
                         "10000000-0000-0000-0000-000000000001",
                         ORGANIZER["id"],
-                        "20000000-0000-0000-0000-000000000004",
                     ),
                 )
 

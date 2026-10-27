@@ -42,10 +42,9 @@ def student_dashboard(student_id):
             stats["unread_notifications"] = _single_val(cursor)
             cursor.execute(
                 """select r.id as registration_id, e.id as event_id, e.title, e.event_date,
-                          e.start_time, e.end_time, v.name as venue_name,
+                          e.start_time, e.end_time,
                           r.status as registration_status
                     from registrations r join events e on e.id = r.event_id
-                    join venues v on v.id = e.venue_id
                     where r.student_id = %s and r.status = 'registered' and e.status = 'published' and e.event_date >= current_date
                     order by e.event_date, e.start_time limit 5""", (student_id,))
             upcoming = _rows(cursor)

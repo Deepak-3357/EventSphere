@@ -67,7 +67,6 @@ def create_app(config_class=None):
     from app.routes.dashboard import dashboard_bp
     from app.routes.od_letters import od_letters_bp
     from app.routes.admin import admin_bp
-    from app.routes.venues import venues_management_bp
 
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -79,7 +78,6 @@ def create_app(config_class=None):
     app.register_blueprint(dashboard_bp, url_prefix="/api")
     app.register_blueprint(od_letters_bp, url_prefix="/api")
     app.register_blueprint(admin_bp, url_prefix="/api/admin")
-    app.register_blueprint(venues_management_bp, url_prefix="/api/venues")
 
     @app.after_request
     def add_cors_headers(response):

@@ -19,7 +19,7 @@ fetch(apiUrl("/api/events?status=published&limit=24"))
         <article class="card h-100 border-0 shadow-sm event-card"><img class="event-cover" src="${escapeHtml(event.image_url || "../assets/img/event-fallback.svg")}" alt="Cover image for ${escapeHtml(event.title)}" onerror="this.onerror=null;this.src='../assets/img/event-fallback.svg';"><div class="card-body">
           <span class="badge text-bg-primary mb-3">${escapeHtml(event.category.name)}</span>
           <h2 class="h5">${escapeHtml(event.title)}</h2>
-          <p class="small text-secondary">${escapeHtml(event.event_date)} · ${escapeHtml(event.venue.name)}</p>
+          <p class="small text-secondary">${escapeHtml(event.event_date)}</p>
           <p class="text-secondary">${escapeHtml(event.description)}</p>
           <a class="btn btn-outline-primary btn-sm" href="detail.html?id=${encodeURIComponent(event.id)}">View details</a>
         </div></article>

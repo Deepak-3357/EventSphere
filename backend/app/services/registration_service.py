@@ -243,7 +243,6 @@ def _registration_select():
             from team_members tm where tm.team_id = r.team_id), '[]'::jsonb) as team_members,
         e.title, e.event_date, e.start_time, e.end_time, e.capacity,
         e.registration_deadline, e.status as event_status,
-        v.name as venue_name, v.location as venue_location,
         c.name as category_name,
         p.full_name as student_name, p.department as student_department, p.year as student_year
     """
@@ -260,7 +259,6 @@ def _serialize_registration(row, columns):
         "capacity": data.pop("capacity"),
         "registration_deadline": data.pop("registration_deadline"),
         "status": data.pop("event_status"),
-        "venue": {"name": data.pop("venue_name"), "location": data.pop("venue_location")},
         "category": data.pop("category_name"),
     }
     data["team"] = None
@@ -291,7 +289,6 @@ def list_student_registrations(student_id, status=None, upcoming=False):
                 f"""select {_registration_select()}
                     from registrations r
                     join events e on e.id = r.event_id
-                    join venues v on v.id = e.venue_id
                     join categories c on c.id = e.category_id
                     join profiles p on p.id = r.student_id
                     left join teams t on t.id = r.team_id
@@ -311,7 +308,6 @@ def get_registration(registration_id):
                 f"""select {_registration_select()}
                     from registrations r
                     join events e on e.id = r.event_id
-                    join venues v on v.id = e.venue_id
                     join categories c on c.id = e.category_id
                     join profiles p on p.id = r.student_id
                     left join teams t on t.id = r.team_id
@@ -340,7 +336,6 @@ def list_event_registrations(event_id, status=None):
                 f"""select {_registration_select()}
                     from registrations r
                     join events e on e.id = r.event_id
-                    join venues v on v.id = e.venue_id
                     join categories c on c.id = e.category_id
                     join profiles p on p.id = r.student_id
                     left join teams t on t.id = r.team_id
@@ -373,7 +368,6 @@ def list_all_registrations(event_id=None, status=None, student_id=None):
                 f"""select {_registration_select()}
                     from registrations r
                     join events e on e.id = r.event_id
-                    join venues v on v.id = e.venue_id
                     join categories c on c.id = e.category_id
                     join profiles p on p.id = r.student_id
                     left join teams t on t.id = r.team_id{where}
@@ -392,14 +386,13 @@ def get_event_pass(registration_id, student_id):
             cursor.execute(
                 """select r.id, r.status, r.student_id, e.id, e.title, e.description,
                           e.event_date, e.start_time, e.end_time, e.status,
-                          v.name, v.location, p.full_name, p.department, p.year,
+                          p.full_name, p.department, p.year,
                           r.participation_type, t.id, t.name,
                           coalesce((select jsonb_agg(jsonb_build_object('full_name', tm.full_name, 'email', tm.email, 'position', tm.position) order by tm.position)
                                     from team_members tm where tm.team_id = r.team_id), '[]'::jsonb),
                           r.registered_at
                    from registrations r
                    join events e on e.id = r.event_id
-                   join venues v on v.id = e.venue_id
                    join profiles p on p.id = r.student_id
                    left join teams t on t.id = r.team_id
                    where r.id = %s and (r.student_id = %s or exists (select 1 from team_members tm where tm.team_id = r.team_id and tm.student_id = %s))""",
@@ -413,7 +406,7 @@ def get_event_pass(registration_id, student_id):
             return {
                 "registration_id": str(row[0]),
                 "registration_status": row[1],
-                "registered_at": row[19].isoformat() if hasattr(row[19], "isoformat") else str(row[19]),
+                "registered_at": row[17].isoformat() if hasattr(row[17], "isoformat") else str(row[17]),
                 "event": {
                     "id": str(row[3]),
                     "title": row[4],
@@ -422,9 +415,8 @@ def get_event_pass(registration_id, student_id):
                     "start_time": row[7].isoformat() if hasattr(row[7], "isoformat") else str(row[7]),
                     "end_time": row[8].isoformat() if hasattr(row[8], "isoformat") else str(row[8]),
                     "status": row[9],
-                    "venue": {"name": row[10], "location": row[11]},
                 },
-                "student": {"name": row[12], "department": row[13], "year": row[14]},
-                "participation_type": row[15],
-                "team": {"id": str(row[16]), "name": row[17], "members": row[18] or []} if row[15] == "team" else None,
+                "student": {"name": row[10], "department": row[11], "year": row[12]},
+                "participation_type": row[13],
+                "team": {"id": str(row[14]), "name": row[15], "members": row[16] or []} if row[13] == "team" else None,
             }

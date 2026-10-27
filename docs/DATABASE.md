@@ -10,7 +10,6 @@ profiles
    └──< notifications
 
 categories ──< events
-venues ──────< events
 events ──────< registrations
 registrations ── attendance (one check-in per registration)
 events ──────< attendance
@@ -26,9 +25,9 @@ profiles ───────< od_letters
 - Role, event status, registration status, and notification type use check constraints to keep values predictable.
 - Required names and text fields reject blank strings, not only `NULL`.
 - Event time ordering is enforced with `end_time > start_time`; capacity values must be positive.
-- Foreign keys use `ON DELETE RESTRICT` so an organizer, venue, event, or profile cannot be removed while historical records depend on it.
+- Foreign keys use `ON DELETE RESTRICT` so an organizer, event, or profile cannot be removed while historical records depend on it. Existing event venue UUIDs are retained as nullable legacy values during venue removal.
 - The unique `(event_id, student_id)` constraint prevents duplicate registrations at the database level.
-- Indexes support event discovery, organizer/category/venue filtering, registration lookup, user notification lookup, and attendance reporting.
+- Indexes support event discovery, organizer/category filtering, registration lookup, user notification lookup, and attendance reporting.
 - `attendance.registration_id` is unique, and all attendance foreign keys use `ON DELETE RESTRICT` to preserve audit history.
 - `od_letters.registration_id` and `od_letters.letter_number` are unique. OD records retain history while PDF download checks that the source registration is still active.
 

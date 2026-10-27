@@ -1,4 +1,4 @@
-"""Database-free regression tests for safe public catalog failures."""
+"""Regression tests for the public category catalog and venue removal."""
 
 import sys
 import unittest
@@ -20,38 +20,32 @@ class CatalogApiTestCase(unittest.TestCase):
         app.config.update(TESTING=True)
         cls.client = app.test_client()
 
-    def test_venue_list_success_uses_data_array(self):
-        venues = [{"id": "venue-1", "name": "Main Hall", "location": "Campus", "capacity": 100, "is_active": True}]
-        with patch("app.routes.catalog.venue_service.list_venues", return_value=venues):
-            response = self.client.get("/api/venues")
+    def test_category_list_success_uses_data_array(self):
+        categories = [{"id": "category-1", "name": "Technology", "description": "Tech events"}]
+        with patch("app.routes.catalog.event_service.list_categories", return_value=categories):
+            response = self.client.get("/api/categories")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json(), {"data": venues, "success": True})
+        self.assertEqual(response.get_json(), {"data": categories, "success": True})
 
-    def test_venue_database_failure_is_safe_json(self):
-        with patch("app.routes.catalog.venue_service.list_venues", side_effect=DatabaseError("database details must stay server-side")):
-            response = self.client.get("/api/venues")
+    def test_category_database_failure_is_safe_json(self):
+        with patch("app.routes.catalog.event_service.list_categories", side_effect=DatabaseError("database details must stay server-side")):
+            response = self.client.get("/api/categories")
         self.assertEqual(response.status_code, 500)
         body = response.get_json()
         self.assertEqual(body["error"]["code"], "DATABASE_ERROR")
-        self.assertEqual(body["error"]["message"], "The venue request could not be completed.")
         self.assertNotIn("database details", response.get_data(as_text=True))
 
+    def test_venue_api_is_removed(self):
+        self.assertEqual(self.client.get("/api/venues").status_code, 404)
 
-class FrontendFailureHandlingTestCase(unittest.TestCase):
-    def test_organizer_event_and_venue_loading_are_independent_and_validated(self):
+
+class VenueRemovalFrontendTestCase(unittest.TestCase):
+    def test_event_management_has_no_venue_lookup_or_failure_dependency(self):
         source = (ROOT / "frontend/organizer/events/manage.js").read_text(encoding="utf-8")
-        self.assertIn("Array.isArray(body.data)", source)
-        self.assertIn("Promise.all([loadLookups(), loadEvents()])", source)
-        self.assertIn("Venue information is temporarily unavailable.", source)
-        self.assertIn("setVenueLookupState(false)", source)
-
-    def test_venue_page_disables_booking_and_offers_retry_on_failure(self):
-        source = (ROOT / "frontend/assets/js/venues.js").read_text(encoding="utf-8")
-        page = (ROOT / "frontend/venues/index.html").read_text(encoding="utf-8")
-        self.assertIn("Array.isArray(loadedVenues)", source)
-        self.assertIn("setBookingEnabled(false)", source)
-        self.assertIn("retryVenueButton", source)
-        self.assertIn('id="retryVenueButton"', page)
+        page = (ROOT / "frontend/organizer/events/index.html").read_text(encoding="utf-8")
+        self.assertNotIn("/api/venues", source)
+        self.assertNotIn("venue", source.lower())
+        self.assertNotIn("venue", page.lower())
 
 
 if __name__ == "__main__":

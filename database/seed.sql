@@ -16,17 +16,10 @@ insert into categories (id, name, description) values
     ('10000000-0000-0000-0000-000000000005', 'Seminar', 'Academic and professional seminars.')
 on conflict (id) do nothing;
 
-insert into venues (id, name, location, capacity) values
-    ('20000000-0000-0000-0000-000000000001', 'Main Auditorium', 'North Campus', 500),
-    ('20000000-0000-0000-0000-000000000002', 'Computer Lab', 'Technology Block, First Floor', 80),
-    ('20000000-0000-0000-0000-000000000003', 'Seminar Hall', 'Central Academic Block', 150),
-    ('20000000-0000-0000-0000-000000000004', 'Innovation Lab', 'Research and Innovation Centre', 60)
-on conflict (id) do nothing;
-
-insert into events (id, title, description, category_id, organizer_id, venue_id, event_date, start_time, end_time, capacity, registration_deadline, status) values
-    ('30000000-0000-0000-0000-000000000001', 'Campus Hack Day', 'A collaborative day of prototyping and problem solving.', '10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000003', '20000000-0000-0000-0000-000000000002', '2026-11-14', '09:00', '17:00', 80, '2026-11-13 18:00:00+05:30', 'published'),
-    ('30000000-0000-0000-0000-000000000002', 'Intercollegiate Cultural Evening', 'An evening of student performances and creative showcases.', '10000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000004', '20000000-0000-0000-0000-000000000001', '2026-12-05', '17:00', '20:00', 450, '2026-12-04 18:00:00+05:30', 'pending'),
-    ('30000000-0000-0000-0000-000000000003', 'Research Careers Seminar', 'A practical discussion about research pathways and internships.', '10000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000003', '20000000-0000-0000-0000-000000000003', '2026-11-28', '14:00', '16:00', 120, '2026-11-27 18:00:00+05:30', 'draft')
+insert into events (id, title, description, category_id, organizer_id, event_date, start_time, end_time, capacity, registration_deadline, status) values
+    ('30000000-0000-0000-0000-000000000001', 'Campus Hack Day', 'A collaborative day of prototyping and problem solving.', '10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000003', '2026-11-14', '09:00', '17:00', 80, '2026-11-13 18:00:00+05:30', 'published'),
+    ('30000000-0000-0000-0000-000000000002', 'Intercollegiate Cultural Evening', 'An evening of student performances and creative showcases.', '10000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000004', '2026-12-05', '17:00', '20:00', 450, '2026-12-04 18:00:00+05:30', 'pending'),
+    ('30000000-0000-0000-0000-000000000003', 'Research Careers Seminar', 'A practical discussion about research pathways and internships.', '10000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000003', '2026-11-28', '14:00', '16:00', 120, '2026-11-27 18:00:00+05:30', 'draft')
 on conflict (id) do nothing;
 
 insert into registrations (id, event_id, student_id, status) values

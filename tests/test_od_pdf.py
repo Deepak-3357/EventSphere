@@ -52,7 +52,7 @@ def letter(**overrides):
         "status": "generated",
         "verification_token": "signed-token-is-not-printed-in-tests",
         "student": {"name": "A Student", "email": "student@example.test", "department": "Computing", "year": 3},
-        "event": {"title": "Campus Hack Day", "event_date": "2026-10-20", "start_time": "10:00:00", "end_time": "16:00:00", "organizer": "Event Organizer", "venue": {"name": "Innovation Hall", "location": "Main Campus"}},
+        "event": {"title": "Campus Hack Day", "event_date": "2026-10-20", "start_time": "10:00:00", "end_time": "16:00:00", "organizer": "Event Organizer"},
     }
     result.update(overrides)
     return result
@@ -81,7 +81,7 @@ class ODDocumentUnitTestCase(unittest.TestCase):
     def test_long_fields_wrap_without_creating_extra_pages(self):
         document = letter(
             student={"name": "A Very Long Student Name That Needs To Wrap Across Multiple Lines", "email": "long.student@example.test", "department": "School of Computer Science and Information Technology", "year": 4},
-            event={"title": "A Very Long Campus Event Title For The Annual Interdisciplinary Innovation Showcase", "event_date": "2026-10-20", "start_time": "10:00:00", "end_time": "16:00:00", "organizer": "A Very Long Organizer Name", "venue": {"name": "The Main Innovation and Research Auditorium", "location": "North Academic Campus Building"}},
+            event={"title": "A Very Long Campus Event Title For The Annual Interdisciplinary Innovation Showcase", "event_date": "2026-10-20", "start_time": "10:00:00", "end_time": "16:00:00", "organizer": "A Very Long Organizer Name"},
         )
         reader = PdfReader(io.BytesIO(self.render(document)))
         self.assertEqual(len(reader.pages), 1)
@@ -90,7 +90,7 @@ class ODDocumentUnitTestCase(unittest.TestCase):
         self.assertIn("Annual Interdisciplinary Innovation Showcase", text)
 
     def test_missing_optional_fields_use_safe_fallbacks(self):
-        document = letter(student={"name": "Student", "email": None, "department": None, "year": None}, event={"title": "Event", "event_date": "2026-10-20", "start_time": None, "end_time": None, "organizer": None, "venue": {"name": None, "location": None}})
+        document = letter(student={"name": "Student", "email": None, "department": None, "year": None}, event={"title": "Event", "event_date": "2026-10-20", "start_time": None, "end_time": None, "organizer": None})
         reader = PdfReader(io.BytesIO(self.render(document)))
         self.assertEqual(len(reader.pages), 1)
         self.assertIn("Not available", reader.pages[0].extract_text())

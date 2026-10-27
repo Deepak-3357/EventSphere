@@ -12,7 +12,6 @@ profiles
    └──< notifications   (notifications.user_id)
 
 categories ──< events   (events.category_id)
-venues ──────< events   (events.venue_id)
 events ──────< registrations (registrations.event_id)
 ```
 
@@ -22,8 +21,7 @@ The full reproducible schema is in `supabase/migrations/20261008120000_initial_e
 
 - `profiles`: UUID primary key, unique email, role check (`student`, `organizer`, `admin`), optional department/year, timestamps.
 - `categories`: UUID primary key, unique non-empty name, description, creation timestamp.
-- `venues`: UUID primary key, unique non-empty name, location, positive capacity, creation timestamp.
-- `events`: UUID primary key, title/description, category/organizer/venue foreign keys, date/time, positive capacity, deadline, status check, timestamps.
+- `events`: UUID primary key, title/description, category/organizer foreign keys, date/time, positive capacity, deadline, status check, timestamps. Existing venue UUIDs may remain as nullable legacy values until the forward removal migration is applied.
 - `registrations`: UUID primary key, event/student foreign keys, status check, timestamp, unique `(event_id, student_id)`.
 - `notifications`: UUID primary key, user foreign key, non-empty title/message, type check, read flag, timestamp.
 
@@ -31,7 +29,7 @@ Foreign keys use `ON DELETE RESTRICT` to protect historical event, registration,
 
 ## Seed data
 
-`database/seed.sql` contains fake deterministic profiles, categories, venues, events, registrations, and notifications. It contains no passwords or real personal data and can be safely re-run because inserts are conflict-aware.
+`database/seed.sql` contains fake deterministic profiles, categories, events, registrations, and notifications. It contains no passwords or real personal data and can be safely re-run because inserts are conflict-aware.
 
 ## Initialization
 

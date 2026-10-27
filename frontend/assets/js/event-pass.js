@@ -43,7 +43,7 @@ retryPass.addEventListener("click", () => window.location.reload());
       throw new Error("The event pass data is incomplete. Please refresh and try again.");
     }
     document.querySelector("#eventTitle").textContent = pass.event.title;
-    document.querySelector("#eventDetails").textContent = `${pass.event.event_date} · ${pass.event.start_time}–${pass.event.end_time} · ${pass.event.venue.name}, ${pass.event.venue.location}`;
+    document.querySelector("#eventDetails").textContent = `${pass.event.event_date} · ${pass.event.start_time}–${pass.event.end_time}`;
     document.querySelector("#studentDetails").textContent = `${pass.student.name} · ${pass.student.department || ""} · Year ${pass.student.year || ""}`;
     const participationType = document.querySelector("#participationType");
     if (participationType) {

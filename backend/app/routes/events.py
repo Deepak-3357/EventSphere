@@ -18,14 +18,13 @@ events_bp = Blueprint("events", __name__)
 def export_events_xml():
     """Small public XML representation of the published event catalog."""
     try:
-        events, _ = event_service.list_events({"page": 1, "limit": 100, "search": "", "category": "", "venue": "", "date": None, "status": "published"})
+        events, _ = event_service.list_events({"page": 1, "limit": 100, "search": "", "category": "", "date": None, "status": "published"})
         root = Element("events", {"source": "EventSphere"})
         for event in events:
             item = SubElement(root, "event", {"id": str(event["id"])})
             for name, value in (("title", event["title"]), ("description", event.get("description") or ""),
                                 ("date", event["event_date"]), ("start_time", event["start_time"]),
                                 ("end_time", event["end_time"]), ("status", event["status"]),
-                                ("venue", event["venue"]["name"]), ("location", event["venue"]["location"]),
                                 ("category", event["category"]["name"])):
                 SubElement(item, name).text = str(value)
         return Response(tostring(root, encoding="utf-8", xml_declaration=True), content_type="application/xml; charset=utf-8")
@@ -76,7 +75,6 @@ def _filters(identity):
         "limit": limit,
         "search": request.args.get("search", "").strip()[:200],
         "category": request.args.get("category", "").strip()[:100],
-        "venue": request.args.get("venue", "").strip()[:100],
         "date": requested_date,
         "status": requested_status,
     }
@@ -381,7 +379,6 @@ def _change_event_status(event_id, new_status):
                     "title": existing["title"],
                     "description": existing["description"],
                     "category_id": existing["category"]["id"],
-                    "venue_id": existing["venue"]["id"],
                     "event_date": existing["event_date"],
                     "start_time": existing["start_time"],
                     "end_time": existing["end_time"],

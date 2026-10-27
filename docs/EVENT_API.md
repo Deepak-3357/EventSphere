@@ -2,7 +2,7 @@
 
 ## Overview
 
-Phase 4 adds REST event management through Flask. The API uses the existing Supabase PostgreSQL `events`, `categories`, `venues`, and `profiles` tables. Registration and notification workflows are intentionally deferred.
+Phase 4 adds REST event management through Flask. The API uses the existing Supabase PostgreSQL `events`, `categories`, and `profiles` tables. Registration and notification workflows are intentionally deferred.
 
 Base URL: `http://127.0.0.1:5000/api`
 
@@ -24,7 +24,6 @@ Authorization: Bearer <SUPABASE_ACCESS_TOKEN>
 | PATCH | `/events/<id>/publish` | Owner organizer or admin |
 | PATCH | `/events/<id>/cancel` | Owner organizer or admin |
 | GET | `/categories` | Public |
-| GET | `/venues` | Public |
 
 ## Create/update request
 
@@ -33,7 +32,6 @@ Authorization: Bearer <SUPABASE_ACCESS_TOKEN>
   "title": "Campus Hack Day",
   "description": "A collaborative day of prototyping.",
   "category_id": "10000000-0000-0000-0000-000000000001",
-  "venue_id": "20000000-0000-0000-0000-000000000002",
   "event_date": "2099-11-14",
   "start_time": "09:00",
   "end_time": "17:00",
@@ -54,7 +52,6 @@ Authorization: Bearer <SUPABASE_ACCESS_TOKEN>
 - `limit` — default `10`, maximum `100`
 - `search` — title/description search
 - `category` — category name filter
-- `venue` — venue name filter
 - `date` — `YYYY-MM-DD`
 - `status` — private statuses require organizer/admin authorization
 
@@ -98,7 +95,7 @@ HTTP statuses include `200`, `201`, `401`, `403`, `404`, `422`, and `500`.
 
 ## Validation
 
-The backend validates required fields, UUID references, title/description length, ISO dates, time ordering, positive capacity, deadline before event start, allowed statuses, and HTTP(S) image URLs. Category and venue references must exist.
+The backend validates required fields, UUID references, title/description length, ISO dates, time ordering, positive capacity, deadline before event start, allowed statuses, and HTTP(S) image URLs. Category references must exist.
 
 ## Lifecycle
 
@@ -124,4 +121,4 @@ Invoke-RestMethod 'http://127.0.0.1:5000/api/events?search=hack&limit=10'
 For protected requests, add an `Authorization` header containing a short-lived Supabase access token. Never save real tokens in this repository.
 ## XML catalog
 
-`GET /api/events/export.xml` returns up to 100 published events as `application/xml`. It is intentionally public like the published JSON catalog and uses the same server-side event query; XML element serialization escapes titles, descriptions, venues, and categories safely.
+`GET /api/events/export.xml` returns up to 100 published events as `application/xml`. It is intentionally public like the published JSON catalog and uses the same server-side event query; XML element serialization escapes titles, descriptions, and categories safely.

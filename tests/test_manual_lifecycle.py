@@ -42,7 +42,6 @@ def base_payload(prefix="Lifecycle Test"):
         "title": f"{prefix} {uuid.uuid4()}",
         "description": "Lifecycle test event",
         "category_id": "10000000-0000-0000-0000-000000000001",
-        "venue_id": "20000000-0000-0000-0000-000000000004",
         "event_date": FUTURE_DATE,
         "start_time": "10:00",
         "end_time": "11:00",
@@ -56,7 +55,7 @@ class EventPayloadLifecycleTestCase(unittest.TestCase):
 
     def test_edit_without_status_defaults_to_current(self):
         current = {"title": "T", "category_id": "10000000-0000-0000-0000-000000000001",
-                   "venue_id": "20000000-0000-0000-0000-000000000004", "event_date": date(2099, 12, 1),
+                   "event_date": date(2099, 12, 1),
                    "start_time": time(10, 0), "end_time": time(11, 0), "capacity": 10,
                    "registration_deadline": datetime(2099, 11, 30, 18, 0), "status": "published",
                    "participation_mode": "individual", "min_team_size": None, "max_team_size": None,

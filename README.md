@@ -87,7 +87,7 @@ The expected Supabase project reference is documented in `database/README.md`. P
 
 Apply pending migrations **before** deploying backend code that depends on them: Render ships the Flask code while Supabase holds the schema, and a backend that selects a column the database does not have yet turns every affected route into a generic 500. `GET /api/health/schema` reports `503` with the missing objects while a migration is pending. See `database/README.md` for the production catch-up procedure.
 
-The final schema includes `profiles`, `categories`, `venues`, `events`, `registrations`, `notifications`, `attendance`, and `od_letters`. RLS policies restrict direct authenticated reads by ownership; Flask remains the validated write path.
+The final schema includes `profiles`, `categories`, `events`, `registrations`, `notifications`, `attendance`, and `od_letters`. RLS policies restrict direct authenticated reads by ownership; Flask remains the validated write path. Historical venue rows are preserved separately by the venue-removal migration and are no longer part of event management.
 
 ## Authentication
 
@@ -107,7 +107,7 @@ py -m unittest discover -s tests -v
 
 ## Event API
 
-Phase 4 provides event CRUD, organizer ownership checks, admin management, published-event browsing, search/filter/pagination, category/venue lookups, validation, lifecycle actions, and a public XML catalog at `/api/events/export.xml`. See [docs/EVENT_API.md](docs/EVENT_API.md).
+Phase 4 provides event CRUD, organizer ownership checks, admin management, published-event browsing, search/filter/pagination, category lookup, validation, lifecycle actions, and a public XML catalog at `/api/events/export.xml`. See [docs/EVENT_API.md](docs/EVENT_API.md).
 
 ## Student registrations
 

@@ -11,7 +11,7 @@ function safePdfFilename(letterNumber) { return `${String(letterNumber || "event
       fetch(`${apiRoot}/registrations/${encodeURIComponent(registrationId)}/od-letter`, { headers })
     ]);
     const registrationBody = await registration.json(); if (!registration.ok) throw new Error(registrationBody.error?.message || "Registration could not be loaded.");
-    document.querySelector("#odEvent").textContent = registrationBody.data.event.title; document.querySelector("#odMeta").textContent = `${registrationBody.data.event.event_date} · ${registrationBody.data.event.venue.name}`; odCard.classList.remove("d-none");
+    document.querySelector("#odEvent").textContent = registrationBody.data.event.title; document.querySelector("#odMeta").textContent = `${registrationBody.data.event.event_date}`; odCard.classList.remove("d-none");
     if (existing.ok) {
       const existingBody = await existing.json();
       setup(existingBody.data, session);
